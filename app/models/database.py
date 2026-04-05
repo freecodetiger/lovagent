@@ -10,12 +10,19 @@ from app.models.user import Base
 
 
 # 创建数据库引擎
-engine = create_engine(
-    settings.mysql_url,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    echo=False,  # 设为 True 可以看到 SQL 语句
-)
+if settings.database_type == "sqlite":
+    engine = create_engine(
+        settings.database_url,
+        connect_args={"check_same_thread": False},
+        echo=False,  # 设为 True 可以看到 SQL 语句
+    )
+else:
+    engine = create_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        echo=False,  # 设为 True 可以看到 SQL 语句
+    )
 
 # 创建会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

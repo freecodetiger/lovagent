@@ -9,6 +9,7 @@ import json
 from app.models.user import User, Conversation, EmotionState, ShortTermMemory
 from app.models.database import SessionLocal
 from app.config import settings
+from app.utils.helpers import summarize_recent_agent_replies
 
 
 class MemoryService:
@@ -173,6 +174,23 @@ class MemoryService:
             messages.append({"role": "assistant", "content": conv.agent_message})
 
         return messages
+
+    async def get_recent_agent_replies(self, user_id: str, limit: int = 3) -> List[str]:
+        """获取最近几条有意义的 Agent 回复摘要。"""
+        user = self.db.query(User).filter(User.wecom_user_id == user_id).first()
+        if not user:
+            return []
+
+        conversations = (
+            self.db.query(Conversation)
+            .filter(Conversation.user_id == user.id)
+            .order_by(Conversation.created_at.desc())
+            .limit(max(limit * 2, limit))
+            .all()
+        )
+
+        replies = [conv.agent_message for conv in conversations if conv.agent_message]
+        return summarize_recent_agent_replies(replies, limit=limit)
 
     async def save_conversation(
         self,

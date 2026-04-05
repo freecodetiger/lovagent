@@ -60,3 +60,5 @@ logs/
 *.pem
 *.key
 secrets/
+# Binaries
+cloudflared

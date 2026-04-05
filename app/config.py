@@ -23,9 +23,14 @@ class Settings(BaseSettings):
     # 智谱 API 配置
     zhipu_api_key: str = os.getenv("ZHIPU_API_KEY", "")
     zhipu_model: str = os.getenv("ZHIPU_MODEL", "glm-5")
+    zhipu_thinking_type: str = os.getenv("ZHIPU_THINKING_TYPE", "disabled")
     zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
 
     # 数据库配置
+    database_type: str = os.getenv("DATABASE_TYPE", "sqlite")
+    database_path: str = os.getenv("DATABASE_PATH", "./girlchat.db")
+
+    # MySQL 配置 (保留用于生产环境)
     mysql_host: str = os.getenv("MYSQL_HOST", "localhost")
     mysql_port: int = int(os.getenv("MYSQL_PORT", "3306"))
     mysql_user: str = os.getenv("MYSQL_USER", "root")
@@ -35,20 +40,31 @@ class Settings(BaseSettings):
     # 服务配置
     server_host: str = os.getenv("SERVER_HOST", "0.0.0.0")
     server_port: int = int(os.getenv("SERVER_PORT", "8000"))
+    public_base_url: str = os.getenv("PUBLIC_BASE_URL", "")
 
     # 记忆配置
     max_short_term_messages: int = 20  # 短期记忆保留的最大消息数
     max_context_length: int = 4000  # 最大上下文长度（字符）
 
     @property
-    def mysql_url(self) -> str:
-        """生成 MySQL 连接 URL"""
-        return f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+    def database_url(self) -> str:
+        """生成数据库连接 URL"""
+        if self.database_type == "sqlite":
+            return f"sqlite:///{self.database_path}"
+        else:
+            return f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
 
     @property
-    def mysql_async_url(self) -> str:
-        """生成异步 MySQL 连接 URL"""
-        return f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+    def mysql_url(self) -> str:
+        """生成 MySQL 连接 URL (保留兼容性)"""
+        return self.database_url
+
+    @property
+    def wecom_callback_url(self) -> str:
+        """生成企业微信回调地址"""
+        if self.public_base_url:
+            return f"{self.public_base_url.rstrip('/')}/wecom/callback"
+        return f"http://{self.server_host}:{self.server_port}/wecom/callback"
 
 
 # 全局配置实例

@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     # 启动时的初始化逻辑
     print(f"🚀 恋爱 Agent 启动中...")
     print(f"📍 服务地址: http://{settings.server_host}:{settings.server_port}")
-    print(f"🔗 企业微信回调地址: http://100.100.191.48:{settings.server_port}/wecom/callback")
+    print(f"🔗 企业微信回调地址: {settings.wecom_callback_url}")
 
     yield
 

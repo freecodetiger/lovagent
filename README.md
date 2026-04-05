@@ -15,3 +15,11 @@
 2. 安装依赖：`pip install -r requirements.txt`
 3. 配置环境变量：复制 `.env.example` 为 `.env` 并填写配置
 4. 启动服务：`uvicorn app.main:app --host 0.0.0.0 --port 8000`
+
+## 企业微信回调调试
+
+- 企业微信回调地址使用 `PUBLIC_BASE_URL` 拼接 `/wecom/callback`
+- 本地调试可先启动服务：`uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- 再启动 Cloudflare Tunnel：`cloudflared tunnel --url http://localhost:8000`
+- 拿到 Cloudflare 提供的 HTTPS 地址后，设置 `PUBLIC_BASE_URL=https://<你的域名>`
+- 保存企业微信回调地址前，先验证 `https://<你的域名>/health` 可访问
