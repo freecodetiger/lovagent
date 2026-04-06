@@ -10,6 +10,7 @@ from app.services.wecom_service import wecom_service
 from app.services.llm_service import glm_service
 from app.services.emotion_engine import emotion_engine
 from app.services.memory_service import memory_service
+from app.services.persona_service import persona_service
 from app.prompts.templates import build_dynamic_prompt
 from app.utils.helpers import (
     choose_natural_fallback_reply,
@@ -105,7 +106,11 @@ async def wecom_callback_handler(
 
     # 1. 获取或创建用户
     await memory_service.get_or_create_user(user_id)
-    response_constraints = get_response_constraints(user_content)
+    persona_config = persona_service.get_persona_config()
+    response_constraints = get_response_constraints(
+        user_content,
+        persona_config.get("response_preferences"),
+    )
 
     # 2. 分析用户情绪
     try:
@@ -119,7 +124,9 @@ async def wecom_callback_handler(
 
     # 4. 获取记忆上下文
     context = await memory_service.get_conversation_context(user_id)
+    user_memory = await memory_service.get_user_memory(user_id)
     recent_agent_replies = await memory_service.get_recent_agent_replies(user_id, limit=3)
+    web_search_context = await glm_service.maybe_collect_web_context(user_content)
 
     # 5. 构建 Prompt
     system_prompt = build_dynamic_prompt(
@@ -129,6 +136,9 @@ async def wecom_callback_handler(
         context=context,
         current_time=get_current_time(),
         recent_agent_replies=recent_agent_replies,
+        persona_config=persona_config,
+        user_profile=user_memory,
+        web_search_context=web_search_context,
     )
 
     # 6. 调用 LLM 生成回复

@@ -1,0 +1,17 @@
+services:
+  lovagent:
+    build: .
+    container_name: lovagent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_TYPE: sqlite
+      DATABASE_PATH: /data/girlchat.db
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8000
+    volumes:
+      - lovagent_data:/data
+
+volumes:
+  lovagent_data:

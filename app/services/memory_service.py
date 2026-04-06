@@ -19,6 +19,39 @@ class MemoryService:
         self.db = SessionLocal()
         self.max_short_term_messages = settings.max_short_term_messages
 
+    def _create_user(self, wecom_user_id: str) -> User:
+        user = User(
+            wecom_user_id=wecom_user_id,
+            profile=self._get_default_profile(),
+            basic_info={},
+            emotional_patterns={},
+            relationship_milestones=[],
+            preferences=self._get_default_preferences(),
+            first_interaction=datetime.now(),
+            last_interaction=datetime.now(),
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def _build_profile_snapshot(self, user: User) -> Dict:
+        profile = user.profile or self._get_default_profile()
+        snapshot = {
+            "wecom_user_id": user.wecom_user_id,
+            "nickname": user.nickname or "",
+            "avatar_url": user.avatar_url or "",
+            "profile": profile,
+            "basic_info": user.basic_info or profile.get("basic_info", {}),
+            "emotional_patterns": user.emotional_patterns or profile.get("emotional_patterns", {}),
+            "relationship_milestones": user.relationship_milestones or profile.get("relationship_milestones", []),
+            "preferences": user.preferences or profile.get("preferences", {}),
+            "first_interaction": user.first_interaction,
+            "last_interaction": user.last_interaction,
+            "total_conversations": user.total_conversations,
+        }
+        return snapshot
+
     async def get_or_create_user(self, wecom_user_id: str) -> Dict:
         """
         获取或创建用户
@@ -33,34 +66,17 @@ class MemoryService:
         user = self.db.query(User).filter(User.wecom_user_id == wecom_user_id).first()
 
         if not user:
-            # 创建新用户
-            user = User(
-                wecom_user_id=wecom_user_id,
-                profile=self._get_default_profile(),
-                basic_info={},
-                emotional_patterns={},
-                relationship_milestones=[],
-                preferences=self._get_default_preferences(),
-                first_interaction=datetime.now(),
-                last_interaction=datetime.now(),
-            )
-            self.db.add(user)
-            self.db.commit()
-            self.db.refresh(user)
+            user = self._create_user(wecom_user_id)
 
         # 更新最后互动时间
         user.last_interaction = datetime.now()
         user.total_conversations += 1
         self.db.commit()
 
-        return {
-            "id": user.id,
-            "wecom_user_id": user.wecom_user_id,
-            "profile": user.profile,
-            "preferences": user.preferences,
-            "first_interaction": user.first_interaction,
-            "relationship_days": (datetime.now() - user.first_interaction).days,
-        }
+        payload = self._build_profile_snapshot(user)
+        payload["id"] = user.id
+        payload["relationship_days"] = (datetime.now() - user.first_interaction).days
+        return payload
 
     def _get_default_profile(self) -> Dict:
         """获取默认用户画像"""
@@ -170,8 +186,10 @@ class MemoryService:
 
         messages = []
         for conv in conversations:
-            messages.append({"role": "user", "content": conv.user_message})
-            messages.append({"role": "assistant", "content": conv.agent_message})
+            if conv.user_message:
+                messages.append({"role": "user", "content": conv.user_message})
+            if conv.agent_message:
+                messages.append({"role": "assistant", "content": conv.agent_message})
 
         return messages
 
@@ -250,6 +268,89 @@ class MemoryService:
 
         user.profile = current_profile
         self.db.commit()
+
+    async def list_users(self, query: str = "", limit: int = 20) -> List[Dict]:
+        user_query = self.db.query(User)
+        cleaned_query = query.strip()
+        if cleaned_query:
+            like_value = f"%{cleaned_query}%"
+            user_query = user_query.filter(
+                (User.wecom_user_id.ilike(like_value)) | (User.nickname.ilike(like_value))
+            )
+
+        users = (
+            user_query
+            .order_by(User.last_interaction.is_(None), User.last_interaction.desc(), User.created_at.desc())
+            .limit(max(1, min(limit, 50)))
+            .all()
+        )
+
+        return [
+            {
+                "wecom_user_id": user.wecom_user_id,
+                "nickname": user.nickname or "",
+                "avatar_url": user.avatar_url or "",
+                "total_conversations": user.total_conversations,
+                "last_interaction": user.last_interaction.isoformat() if user.last_interaction else None,
+                "first_interaction": user.first_interaction.isoformat() if user.first_interaction else None,
+            }
+            for user in users
+        ]
+
+    async def get_user_memory(self, wecom_user_id: str) -> Optional[Dict]:
+        user = self.db.query(User).filter(User.wecom_user_id == wecom_user_id).first()
+        if not user:
+            return None
+
+        payload = self._build_profile_snapshot(user)
+        payload["recent_conversations"] = await self.get_recent_conversations(wecom_user_id, limit=8)
+        return payload
+
+    async def upsert_user_memory(self, wecom_user_id: str, payload: Dict) -> Dict:
+        user = self.db.query(User).filter(User.wecom_user_id == wecom_user_id).first()
+        if not user:
+            user = self._create_user(wecom_user_id)
+
+        user.nickname = str(payload.get("nickname") or "").strip() or None
+        user.avatar_url = str(payload.get("avatar_url") or "").strip() or None
+        user.basic_info = payload.get("basic_info") or {}
+        user.emotional_patterns = payload.get("emotional_patterns") or {}
+        user.relationship_milestones = payload.get("relationship_milestones") or []
+        user.preferences = payload.get("preferences") or self._get_default_preferences()
+        user.profile = {
+            "basic_info": user.basic_info,
+            "emotional_patterns": user.emotional_patterns,
+            "relationship_milestones": user.relationship_milestones,
+            "preferences": user.preferences,
+        }
+        self.db.commit()
+        return await self.get_user_memory(wecom_user_id)
+
+    async def get_recent_conversations(self, wecom_user_id: str, limit: int = 8) -> List[Dict]:
+        user = self.db.query(User).filter(User.wecom_user_id == wecom_user_id).first()
+        if not user:
+            return []
+
+        conversations = (
+            self.db.query(Conversation)
+            .filter(Conversation.user_id == user.id)
+            .order_by(Conversation.created_at.desc())
+            .limit(max(1, min(limit, 20)))
+            .all()
+        )
+
+        return [
+            {
+                "id": conversation.id,
+                "user_message": conversation.user_message,
+                "agent_message": conversation.agent_message,
+                "message_source": (conversation.memories_used or {}).get("source", "reply"),
+                "user_emotion": conversation.user_emotion,
+                "agent_emotion": conversation.agent_emotion,
+                "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
+            }
+            for conversation in conversations
+        ]
 
 
 # 全局记忆服务实例

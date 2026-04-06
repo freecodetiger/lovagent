@@ -22,6 +22,20 @@ class ResponseConstraintTests(unittest.TestCase):
         self.assertIn(result["style"], {"medium", "long"})
         self.assertGreaterEqual(result["max_tokens"], 128)
 
+    def test_custom_response_preferences_change_limits(self):
+        result = get_response_constraints(
+            "今天真的有点累啊",
+            {
+                "ultra_short_max_chars": 36,
+                "short_max_chars": 120,
+                "medium_max_chars": 150,
+                "long_max_chars": 180,
+            },
+        )
+        self.assertEqual(result["style"], "short")
+        self.assertEqual(result["max_chars"], 120)
+        self.assertEqual(result["max_tokens"], 192)
+
     def test_summarize_recent_agent_replies_skips_duplicates_and_short_text(self):
         result = summarize_recent_agent_replies(
             ["好", "我在呢[抱抱]，你继续说，我认真听着。", "我在呢，你继续说，我认真听着。", "晚点和我说说今天发生了什么吧"],

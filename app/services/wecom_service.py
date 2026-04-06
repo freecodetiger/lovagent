@@ -6,35 +6,33 @@ import xml.etree.ElementTree as ET
 from wechatpy.enterprise import WeChatClient
 from wechatpy.enterprise.crypto import WeChatCrypto
 
-from app.config import settings
+from app.services.runtime_config_service import runtime_config_service
 
 
 class WeComService:
     """企业微信服务"""
 
     def __init__(self):
-        self.corp_id = settings.wecom_corp_id
-        self.agent_id = settings.wecom_agent_id
-        self.secret = settings.wecom_secret
-        self.token = settings.wecom_token
-        self.encoding_aes_key = settings.wecom_encoding_aes_key
+        pass
 
-        # 企业微信加解密工具
-        self.crypto = WeChatCrypto(self.token, self.encoding_aes_key, self.corp_id)
+    def _current_config(self) -> dict:
+        return runtime_config_service.get_effective_wecom_config()
 
-        # 企业微信客户端
-        self.client = WeChatClient(
-            self.corp_id,
-            self.secret,
-        )
+    def _build_crypto(self) -> WeChatCrypto:
+        config = self._current_config()
+        return WeChatCrypto(config["token"], config["encoding_aes_key"], config["corp_id"])
+
+    def _build_client(self) -> WeChatClient:
+        config = self._current_config()
+        return WeChatClient(config["corp_id"], config["secret"])
 
     def verify_callback(self, msg_signature: str, timestamp: str, nonce: str, echostr: str) -> str:
         """校验企业微信回调并返回解密后的明文 echostr"""
-        return self.crypto.check_signature(msg_signature, timestamp, nonce, echostr)
+        return self._build_crypto().check_signature(msg_signature, timestamp, nonce, echostr)
 
     def decrypt_message(self, encrypted_xml: str, msg_signature: str, timestamp: str, nonce: str) -> str:
         """解密消息"""
-        return self.crypto.decrypt_message(encrypted_xml, msg_signature, timestamp, nonce)
+        return self._build_crypto().decrypt_message(encrypted_xml, msg_signature, timestamp, nonce)
 
     def parse_message(self, xml_content: str) -> dict:
         """解析 XML 消息"""
@@ -71,9 +69,10 @@ class WeComService:
 
     def build_text_message(self, to_user: str, content: str) -> str:
         """构建文本消息 XML"""
+        config = self._current_config()
         return f"""<xml>
 <ToUserName>{to_user}</ToUserName>
-<FromUserName>{self.agent_id}</FromUserName>
+<FromUserName>{config["agent_id"]}</FromUserName>
 <CreateTime>{int(float(0))}</CreateTime>
 <MsgType>text</MsgType>
 <Content>{content}</Content>
@@ -81,16 +80,20 @@ class WeComService:
 
     async def send_text_message(self, to_user: str, content: str) -> dict:
         """发送文本消息"""
-        return self.client.message.send_text(
-            int(self.agent_id),
+        config = self._current_config()
+        client = self._build_client()
+        return client.message.send_text(
+            int(config["agent_id"]),
             to_user,
             content,
         )
 
     async def send_markdown_message(self, to_user: str, content: str) -> dict:
         """发送 Markdown 消息"""
-        return self.client.message.send(
-            int(self.agent_id),
+        config = self._current_config()
+        client = self._build_client()
+        return client.message.send(
+            int(config["agent_id"]),
             to_user,
             msg={
                 "msgtype": "markdown",
@@ -100,7 +103,7 @@ class WeComService:
 
     def get_access_token(self) -> str:
         """获取 access_token"""
-        return self.client.access_token
+        return self._build_client().access_token
 
 
 # 全局服务实例

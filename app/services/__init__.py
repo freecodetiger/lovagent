@@ -13,6 +13,12 @@ __all__ = [
     "emotion_engine",
     "MemoryService",
     "memory_service",
+    "ProactiveChatService",
+    "proactive_chat_service",
+    "RuntimeConfigService",
+    "runtime_config_service",
+    "TunnelService",
+    "tunnel_service",
 ]
 
 
@@ -25,6 +31,12 @@ _SERVICE_EXPORTS = {
     "emotion_engine": ("app.services.emotion_engine", "emotion_engine"),
     "MemoryService": ("app.services.memory_service", "MemoryService"),
     "memory_service": ("app.services.memory_service", "memory_service"),
+    "ProactiveChatService": ("app.services.proactive_chat_service", "ProactiveChatService"),
+    "proactive_chat_service": ("app.services.proactive_chat_service", "proactive_chat_service"),
+    "RuntimeConfigService": ("app.services.runtime_config_service", "RuntimeConfigService"),
+    "runtime_config_service": ("app.services.runtime_config_service", "runtime_config_service"),
+    "TunnelService": ("app.services.tunnel_service", "TunnelService"),
+    "tunnel_service": ("app.services.tunnel_service", "tunnel_service"),
 }
 
 

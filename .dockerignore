@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+.venv
+.tools
+.run
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+node_modules
+admin-ui/node_modules
+admin-ui/dist
+admin-ui/*.tsbuildinfo
+tests
+README.md
+guide.md

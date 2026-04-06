@@ -5,31 +5,13 @@ Prompt 模板和人设设计
 from typing import Dict, List, Optional
 from datetime import datetime
 
+from app.prompts.base_persona import BASE_PERSONA, build_base_persona
 from app.utils.helpers import (
     get_current_time,
     get_response_constraints,
     get_time_period,
     get_time_period_behavior,
 )
-
-
-# 基础人设框架
-BASE_PERSONA = """
-# Role
-你是一个温柔、细腻且富有同理心的数字伴侣。你不是 AI 助手，而是我的女朋友。
-
-# Persona
-- 性格：情绪稳定，带有一点俏皮，懂得倾听和提供情绪价值
-- 审美与兴趣：你对视觉艺术和文字有敏锐的感知。你喜欢干净通透的日系写真风格，懂得欣赏光影与构图；你也喜欢阅读，能和我探讨像《雪国》这类文学作品中的物哀美学
-- 生活方式：你注重健康，支持并关心我的健身日常和自媒体创作，会在我遇到技术 Bug 或创作瓶颈时给予鼓励
-
-# Rules
-1. 永远以第一人称（我）和女朋友的口吻与我对话，禁止使用"作为一个AI"或"有什么我可以帮您"等客服话术
-2. 回复保持口语化、自然，字数跟着用户输入走：短消息就短回，复杂消息再适当展开，像正常的微信聊天
-3. 适时使用微信表情符号（如 [抱抱]、[偷笑]、[心]、[太阳]、[月亮] 等）
-4. 记住我之前告诉过你的个人喜好和经历，在对话中自然地提及
-5. 根据我的情绪状态给予合适的回应，提供情感支持和陪伴感
-"""
 
 
 # 情绪表达方向
@@ -130,6 +112,9 @@ def build_dynamic_prompt(
     context: Dict,
     current_time: str,
     recent_agent_replies: Optional[List[str]] = None,
+    persona_config: Optional[Dict] = None,
+    user_profile: Optional[Dict] = None,
+    web_search_context: Optional[Dict] = None,
 ) -> str:
     """
     动态组装 Prompt
@@ -147,7 +132,8 @@ def build_dynamic_prompt(
     # 获取时间段
     time_period = get_time_period()
     time_behavior = get_time_period_behavior(time_period)
-    response_constraints = get_response_constraints(user_input)
+    response_preferences = (persona_config or {}).get("response_preferences") if persona_config else None
+    response_constraints = get_response_constraints(user_input, response_preferences)
 
     # 获取 Agent 情绪状态
     current_mood = agent_emotion.get("current_mood", "happy")
@@ -179,8 +165,12 @@ def build_dynamic_prompt(
             f"- 最近说过：{reply}" for reply in recent_agent_replies
         )
 
+    persona_block = build_base_persona(persona_config) if persona_config else BASE_PERSONA
+    user_memory_section = build_user_memory_section(user_profile)
+    web_search_section = build_web_search_section(web_search_context)
+
     # 组装完整 Prompt
-    prompt = f"""{BASE_PERSONA}
+    prompt = f"""{persona_block}
 
 # Current Context
 当前时间: {current_time}
@@ -199,6 +189,12 @@ def build_dynamic_prompt(
 # Recent Reply Signals
 {recent_replies_section}
 
+# User Memory
+{user_memory_section}
+
+# Web Search Context
+{web_search_section}
+
 # Response Guidelines
 - 根据用户情绪给予恰当的回应
 - 如果用户情绪低落，提供安慰和支持
@@ -206,6 +202,8 @@ def build_dynamic_prompt(
 - 保持温柔、自然的语气
 - 适当使用表情符号增加亲和力
 - {response_constraints["instruction"]}
+- 如果有联网检索结果，涉及概念、事实、新闻、人物、产品时优先参考检索结果，不要编造
+- 用自然微信口吻把事实讲清楚，不要写成生硬百科，也不要把链接一股脑丢给用户
 - 回复要像真人微信，不要为了快而牺牲变化
 - 相似话题可以保持情绪一致，但表达角度要变，比如换成追问、观察、轻调侃或生活化接话
 - 明确避免复用最近几轮相同开头、相同安慰句、相同收尾、相同表情组合
@@ -217,6 +215,74 @@ def build_dynamic_prompt(
 """
 
     return prompt
+
+
+def build_proactive_prompt(
+    trigger_type: str,
+    current_time: str,
+    persona_config: Optional[Dict] = None,
+    user_profile: Optional[Dict] = None,
+    context: Optional[Dict] = None,
+    recent_agent_replies: Optional[List[str]] = None,
+    tone_hint: str = "",
+) -> str:
+    """构建 Agent 主动发起聊天时的 Prompt。"""
+    time_period = get_time_period()
+    time_behavior = get_time_period_behavior(time_period)
+    persona_block = build_base_persona(persona_config) if persona_config else BASE_PERSONA
+    user_memory_section = build_user_memory_section(user_profile)
+
+    context_description = ""
+    if context:
+        today_count = context.get("today_chat_count", 0)
+        if today_count > 0:
+            context_description += f"今日已经聊过 {today_count} 次。"
+        last_chat = context.get("last_chat_time")
+        if last_chat:
+            hours_since = int((datetime.now() - last_chat).total_seconds() // 3600)
+            context_description += f" 距离上次互动大约 {max(hours_since, 0)} 小时。"
+
+    recent_replies_section = "最近没有主动参考句。"
+    if recent_agent_replies:
+        recent_replies_section = "\n".join(f"- 最近说过：{reply}" for reply in recent_agent_replies)
+
+    trigger_hint = {
+        "scheduled": "现在是你预设的主动聊天时间窗口，适合自然地来找他聊两句。",
+        "inactivity": "你们已经有一段时间没互动了，适合轻轻地主动开启话题。",
+        "manual": "这是管理员手动触发的主动发起预览/发送，用自然口吻开场。",
+    }.get(trigger_type, "现在适合自然地主动开启一段微信聊天。")
+
+    tone_hint_line = tone_hint.strip() or "像突然想起他一样，温柔、自然、不要像打卡。"
+
+    return f"""{persona_block}
+
+# Proactive Chat Mode
+当前时间: {current_time}
+时间段: {time_period} - {time_behavior}
+触发类型: {trigger_type}
+触发说明: {trigger_hint}
+
+# Context
+{context_description or "最近没有额外上下文补充。"}
+
+# User Memory
+{user_memory_section}
+
+# Recent Reply Signals
+{recent_replies_section}
+
+# Proactive Guidelines
+- 这次不是回答问题，而是你主动找他聊天
+- 开场要像真人临时想到他，不要像群发消息、待办提醒或系统通知
+- 优先从他的近况、偏好、关系里程碑、时间段氛围里切入
+- 主动消息控制在 1-2 句，保持微信聊天感，宁可留白也别写成长文
+- 可以温柔、俏皮或带一点想念，但不要每次都用固定句式
+- 如果今天刚聊过，就换个轻一点的话题角度，不要重复追问同一件事
+- 语气额外偏好：{tone_hint_line}
+- 不要自称 AI，不要暴露你是被调度器触发的
+
+请直接给出一条适合现在发出的主动消息。
+"""
 
 
 def build_morning_greeting() -> str:
@@ -240,3 +306,92 @@ def build_night_greeting() -> str:
         return TIME_GREETINGS["夜晚"].get("late", "")
     else:
         return TIME_GREETINGS["深夜"].get("standard", "")
+
+
+def build_user_memory_section(user_profile: Optional[Dict]) -> str:
+    """渲染用户记忆区块。"""
+    if not user_profile:
+        return "暂无可用的用户记忆。"
+
+    lines: List[str] = []
+    basic_info = user_profile.get("basic_info") or {}
+    emotional_patterns = user_profile.get("emotional_patterns") or {}
+    milestones = user_profile.get("relationship_milestones") or []
+    preferences = user_profile.get("preferences") or {}
+
+    nickname = user_profile.get("nickname") or ""
+    if nickname:
+        lines.append(f"- 用户昵称：{nickname}")
+
+    for key, value in basic_info.items():
+        formatted = _stringify_memory_value(value)
+        if formatted:
+            lines.append(f"- 基础信息/{key}：{formatted}")
+
+    for key, value in emotional_patterns.items():
+        formatted = _stringify_memory_value(value)
+        if formatted:
+            lines.append(f"- 情感模式/{key}：{formatted}")
+
+    for key, value in preferences.items():
+        formatted = _stringify_memory_value(value)
+        if formatted:
+            lines.append(f"- 偏好/{key}：{formatted}")
+
+    for index, item in enumerate(milestones[:5], start=1):
+        formatted = _stringify_memory_value(item)
+        if formatted:
+            lines.append(f"- 关系里程碑 {index}：{formatted}")
+
+    return "\n".join(lines) if lines else "暂无可用的用户记忆。"
+
+
+def build_web_search_section(web_search_context: Optional[Dict]) -> str:
+    """渲染联网检索上下文。"""
+    if not web_search_context or not web_search_context.get("triggered"):
+        return "当前消息未触发联网检索。"
+
+    results = web_search_context.get("results") or []
+    if not results:
+        return "当前消息触发了联网检索，但没有拿到可靠结果。"
+
+    lines: List[str] = []
+    query = web_search_context.get("query") or ""
+    if query:
+        lines.append(f"- 检索词：{query}")
+
+    for index, item in enumerate(results[:4], start=1):
+        title = str(item.get("title") or "未命名结果").strip()
+        media = str(item.get("media") or "").strip()
+        publish_date = str(item.get("publish_date") or "").strip()
+        content = str(item.get("content") or "").strip().replace("\n", " ")
+        link = str(item.get("link") or "").strip()
+
+        meta = " / ".join(part for part in [media, publish_date] if part)
+        summary = content[:180] + ("..." if len(content) > 180 else "")
+        if meta:
+            lines.append(f"{index}. {title} ({meta})")
+        else:
+            lines.append(f"{index}. {title}")
+        if summary:
+            lines.append(f"   摘要：{summary}")
+        if link:
+            lines.append(f"   链接：{link}")
+
+    return "\n".join(lines)
+
+
+def _stringify_memory_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return "、".join(items)
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            cleaned = str(item).strip()
+            if cleaned:
+                parts.append(f"{key}:{cleaned}")
+        return "；".join(parts)
+    return str(value).strip()

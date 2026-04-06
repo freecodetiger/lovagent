@@ -4,7 +4,9 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-if "httpx" not in sys.modules:
+try:
+    import httpx  # noqa: F401
+except ModuleNotFoundError:
     httpx_stub = types.ModuleType("httpx")
 
     class _UnusedAsyncClient:
@@ -23,13 +25,19 @@ if "httpx" not in sys.modules:
     httpx_stub.AsyncClient = _UnusedAsyncClient
     sys.modules["httpx"] = httpx_stub
 
-if "app.config" not in sys.modules:
+try:
+    import app.config  # noqa: F401
+except ModuleNotFoundError:
     config_stub = types.ModuleType("app.config")
     config_stub.settings = types.SimpleNamespace(
         zhipu_api_key="test-key",
         zhipu_model="glm-5",
         zhipu_thinking_type="disabled",
         zhipu_base_url="https://example.com",
+        zhipu_web_search_enabled=True,
+        zhipu_web_search_engine="search_std",
+        zhipu_web_search_count=4,
+        zhipu_web_search_content_size="medium",
     )
     sys.modules["app.config"] = config_stub
 
@@ -101,6 +109,53 @@ class GLMServiceTests(unittest.TestCase):
         self.assertEqual(kwargs["temperature"], 0.88)
         self.assertEqual(kwargs["top_p"], 0.95)
         self.assertEqual(kwargs["max_tokens"], 64)
+
+    def test_should_use_web_search_detects_concept_and_freshness_queries(self):
+        service = GLMService()
+
+        self.assertTrue(service.should_use_web_search("AlphaFold 是什么"))
+        self.assertTrue(service.should_use_web_search("帮我查一下今天比特币价格"))
+        self.assertFalse(service.should_use_web_search("今天好想你呀"))
+
+    def test_maybe_collect_web_context_returns_results_when_triggered(self):
+        service = GLMService()
+
+        with patch.object(
+            service,
+            "web_search",
+            AsyncMock(
+                return_value=[
+                    {
+                        "title": "AlphaFold - DeepMind",
+                        "link": "https://example.com/alphafold",
+                        "content": "AlphaFold 是一个蛋白质结构预测系统。",
+                        "media": "DeepMind",
+                        "publish_date": "2024-01-01",
+                    }
+                ]
+            ),
+        ):
+            result = asyncio.run(service.maybe_collect_web_context("AlphaFold 是什么"))
+
+        self.assertTrue(result["triggered"])
+        self.assertEqual(result["query"], "AlphaFold 是什么")
+        self.assertEqual(result["results"][0]["media"], "DeepMind")
+
+    def test_web_search_uses_documented_payload_fields(self):
+        service = GLMService()
+
+        with patch.object(
+            service,
+            "_request_web_search",
+            AsyncMock(return_value={"search_result": []}),
+        ) as mocked_request:
+            asyncio.run(service.web_search("AlphaFold 是什么"))
+
+        payload = mocked_request.await_args.args[0]
+        self.assertEqual(payload["search_query"], "AlphaFold 是什么")
+        self.assertIn("count", payload)
+        self.assertNotIn("search_count", payload)
+        self.assertEqual(payload["search_intent"], False)
 
 
 if __name__ == "__main__":

@@ -63,9 +63,11 @@ class WeComCallbackHandlerTests(unittest.TestCase):
         user_emotion=None,
         recent_replies=None,
         chat_side_effect=None,
+        persona_config=None,
     ):
         user_emotion = user_emotion or {"neutral": 1.0}
         recent_replies = recent_replies or []
+        persona_config = persona_config or {"response_preferences": {}}
         chat_mock = AsyncMock(side_effect=chat_side_effect)
         send_mock = AsyncMock(return_value={"errcode": 0})
         save_mock = AsyncMock()
@@ -89,7 +91,9 @@ class WeComCallbackHandlerTests(unittest.TestCase):
             patch.object(wecom.memory_service, "save_conversation", save_mock),
             patch.object(wecom.glm_service, "analyze_emotion", AsyncMock(return_value=user_emotion)),
             patch.object(wecom.glm_service, "chat_with_context", chat_mock),
+            patch.object(wecom.glm_service, "maybe_collect_web_context", AsyncMock(return_value={"triggered": False, "query": "", "results": []})),
             patch.object(wecom.emotion_engine, "update_state", AsyncMock(return_value={"current_mood": "caring", "intensity": 55})),
+            patch.object(wecom.persona_service, "get_persona_config", return_value=persona_config),
         ):
             response = asyncio.run(
                 wecom.wecom_callback_handler(
@@ -149,6 +153,85 @@ class WeComCallbackHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(send_mock.await_args.args[1], "我在呀[心]，你再多和我说一点。")
+
+    def test_handler_uses_persona_response_preferences_for_generation_limits(self):
+        _, chat_mock, _, _ = self._run_handler(
+            user_content="今天真的有点累啊",
+            user_emotion={"tired": 0.8},
+            chat_side_effect=["先抱一下你，慢慢和我说。"],
+            persona_config={
+                "display_name": "小甜",
+                "response_preferences": {
+                    "ultra_short_max_chars": 36,
+                    "short_max_chars": 120,
+                    "medium_max_chars": 150,
+                    "long_max_chars": 180,
+                },
+            },
+        )
+
+        self.assertEqual(chat_mock.await_args.kwargs["max_tokens"], 192)
+
+    def test_handler_includes_web_search_context_when_triggered(self):
+        chat_mock = AsyncMock(return_value="AlphaFold 是做蛋白质结构预测的，我刚帮你查了下。")
+        send_mock = AsyncMock(return_value={"errcode": 0})
+        save_mock = AsyncMock()
+
+        with (
+            patch.object(wecom.wecom_service, "decrypt_message", return_value="<xml />"),
+            patch.object(
+                wecom.wecom_service,
+                "parse_message",
+                return_value={
+                    "msg_type": "text",
+                    "from_user": "user-1",
+                    "content": "AlphaFold 是什么",
+                },
+            ),
+            patch.object(wecom.wecom_service, "send_text_message", send_mock),
+            patch.object(wecom.memory_service, "get_or_create_user", AsyncMock(return_value={"id": 1})),
+            patch.object(wecom.memory_service, "get_conversation_context", AsyncMock(return_value={"today_chat_count": 1})),
+            patch.object(wecom.memory_service, "get_recent_messages", AsyncMock(return_value=[])),
+            patch.object(wecom.memory_service, "get_recent_agent_replies", AsyncMock(return_value=[])),
+            patch.object(wecom.memory_service, "get_user_memory", AsyncMock(return_value=None)),
+            patch.object(wecom.memory_service, "save_conversation", save_mock),
+            patch.object(wecom.glm_service, "analyze_emotion", AsyncMock(return_value={"neutral": 1.0})),
+            patch.object(
+                wecom.glm_service,
+                "maybe_collect_web_context",
+                AsyncMock(
+                    return_value={
+                        "triggered": True,
+                        "query": "AlphaFold 是什么",
+                        "results": [
+                            {
+                                "title": "AlphaFold - DeepMind",
+                                "media": "DeepMind",
+                                "publish_date": "2024-01-01",
+                                "content": "AlphaFold 是一个蛋白质结构预测系统。",
+                                "link": "https://example.com/alphafold",
+                            }
+                        ],
+                    }
+                ),
+            ),
+            patch.object(wecom.glm_service, "chat_with_context", chat_mock),
+            patch.object(wecom.emotion_engine, "update_state", AsyncMock(return_value={"current_mood": "happy", "intensity": 40})),
+            patch.object(wecom.persona_service, "get_persona_config", return_value={"response_preferences": {}}),
+        ):
+            response = asyncio.run(
+                wecom.wecom_callback_handler(
+                    request=DummyRequest(),
+                    msg_signature="sig",
+                    timestamp="123",
+                    nonce="nonce",
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        system_prompt = chat_mock.await_args.kwargs["system_prompt"]
+        self.assertIn("Web Search Context", system_prompt)
+        self.assertIn("AlphaFold - DeepMind", system_prompt)
 
 
 if __name__ == "__main__":

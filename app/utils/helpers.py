@@ -5,7 +5,7 @@
 from datetime import datetime
 import re
 from difflib import SequenceMatcher
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 
 def get_current_time() -> str:
@@ -79,7 +79,7 @@ def sanitize_input(text: str) -> str:
     return text
 
 
-def get_response_constraints(text: str) -> Dict[str, object]:
+def get_response_constraints(text: str, response_preferences: Optional[Dict[str, int]] = None) -> Dict[str, object]:
     """
     根据用户输入长度和复杂度，动态约束回复长度与生成参数。
     """
@@ -88,41 +88,76 @@ def get_response_constraints(text: str) -> Dict[str, object]:
     question_markers = ("?", "？", "吗", "呢", "么", "什么", "怎么", "为什么", "要不要", "是不是")
     has_question = any(marker in cleaned for marker in question_markers)
     has_line_break = "\n" in cleaned
+    preferences = _merge_response_preferences(response_preferences)
+
+    ultra_short_max_chars = preferences["ultra_short_max_chars"]
+    short_max_chars = preferences["short_max_chars"]
+    medium_max_chars = preferences["medium_max_chars"]
+    long_max_chars = preferences["long_max_chars"]
 
     if length <= 6 and not has_question and not has_line_break:
         return {
             "style": "ultra_short",
-            "instruction": "这轮只回 1 句短回复，10-22 个汉字左右，最多不超过 30 个汉字。",
-            "max_chars": 30,
-            "max_tokens": 48,
+            "instruction": f"这轮只回 1 句短回复，10-{ultra_short_max_chars} 个汉字左右，最多不超过 {ultra_short_max_chars} 个汉字。",
+            "max_chars": ultra_short_max_chars,
+            "max_tokens": _estimate_max_tokens(ultra_short_max_chars, minimum=48),
             "context_limit": 2,
         }
 
     if length <= 18 and not has_line_break:
         return {
             "style": "short",
-            "instruction": "这轮优先回 1 句，必要时最多 2 句，18-40 个汉字左右，最多不超过 55 个汉字。",
-            "max_chars": 55,
-            "max_tokens": 80,
+            "instruction": f"这轮优先回 1 句，必要时最多 2 句，18-{short_max_chars} 个汉字左右，最多不超过 {short_max_chars} 个汉字。",
+            "max_chars": short_max_chars,
+            "max_tokens": _estimate_max_tokens(short_max_chars, minimum=80),
             "context_limit": 3,
         }
 
     if length <= 60 and not has_line_break:
         return {
             "style": "medium",
-            "instruction": "这轮回 1-2 句自然微信式回复，30-70 个汉字左右，最多不超过 90 个汉字。",
-            "max_chars": 90,
-            "max_tokens": 128,
+            "instruction": f"这轮回 1-2 句自然微信式回复，30-{medium_max_chars} 个汉字左右，最多不超过 {medium_max_chars} 个汉字。",
+            "max_chars": medium_max_chars,
+            "max_tokens": _estimate_max_tokens(medium_max_chars, minimum=128),
             "context_limit": 4,
         }
 
     return {
         "style": "long",
-        "instruction": "这轮可以回 2-3 句，但仍要克制，60-120 个汉字左右，最多不超过 140 个汉字。",
-        "max_chars": 140,
-        "max_tokens": 192,
+        "instruction": f"这轮可以回 2-3 句，但仍要克制，60-{long_max_chars} 个汉字左右，最多不超过 {long_max_chars} 个汉字。",
+        "max_chars": long_max_chars,
+        "max_tokens": _estimate_max_tokens(long_max_chars, minimum=192),
         "context_limit": 5,
     }
+
+
+def _merge_response_preferences(response_preferences: Optional[Dict[str, int]] = None) -> Dict[str, int]:
+    defaults = {
+        "ultra_short_max_chars": 30,
+        "short_max_chars": 55,
+        "medium_max_chars": 90,
+        "long_max_chars": 140,
+    }
+    if not response_preferences:
+        return defaults
+
+    merged = dict(defaults)
+    for key, default_value in defaults.items():
+        raw = response_preferences.get(key, default_value)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = default_value
+        merged[key] = max(12, min(240, value))
+
+    merged["short_max_chars"] = max(merged["short_max_chars"], merged["ultra_short_max_chars"])
+    merged["medium_max_chars"] = max(merged["medium_max_chars"], merged["short_max_chars"])
+    merged["long_max_chars"] = max(merged["long_max_chars"], merged["medium_max_chars"])
+    return merged
+
+
+def _estimate_max_tokens(max_chars: int, minimum: int) -> int:
+    return max(minimum, int(max_chars * 1.6))
 
 
 def summarize_recent_agent_replies(messages: Iterable[str], limit: int = 3) -> List[str]:

@@ -62,3 +62,10 @@ logs/
 secrets/
 # Binaries
 cloudflared
+.tools/
+.run/
+
+# Frontend
+admin-ui/node_modules/
+admin-ui/dist/
+admin-ui/*.tsbuildinfo

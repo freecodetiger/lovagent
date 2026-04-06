@@ -6,6 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
+import app.models.admin  # noqa: F401
+import app.models.conversation  # noqa: F401
+import app.models.emotion  # noqa: F401
 from app.models.user import Base
 
 

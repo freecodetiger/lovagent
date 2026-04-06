@@ -2,25 +2,46 @@
 FastAPI 应用入口
 """
 
+import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import wecom
+from app.models.database import init_db
+from app.routers import admin, setup, wecom
+from app.services.proactive_chat_service import proactive_chat_service
+from app.services.tunnel_service import tunnel_service
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+ADMIN_DIST_DIR = BASE_DIR / "admin-ui" / "dist"
+ADMIN_INDEX_PATH = ADMIN_DIST_DIR / "index.html"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时的初始化逻辑
+    init_db()
     print(f"🚀 恋爱 Agent 启动中...")
     print(f"📍 服务地址: http://{settings.server_host}:{settings.server_port}")
     print(f"🔗 企业微信回调地址: {settings.wecom_callback_url}")
+    tunnel_service.ensure_started()
+    proactive_scheduler_task = asyncio.create_task(proactive_chat_service.scheduler_loop())
 
     yield
 
     # 关闭时的清理逻辑
+    proactive_scheduler_task.cancel()
+    try:
+        await proactive_scheduler_task
+    except asyncio.CancelledError:
+        pass
     print("👋 恋爱 Agent 关闭中...")
 
 
@@ -34,14 +55,27 @@ app = FastAPI(
 # CORS 中间件配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.admin_dev_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.resolved_admin_session_secret,
+    session_cookie=settings.admin_cookie_name,
+    https_only=False,
+    same_site="lax",
+)
 
 # 注册路由
 app.include_router(wecom.router, prefix="/wecom", tags=["企业微信"])
+app.include_router(admin.router)
+app.include_router(setup.router)
+
+if ADMIN_DIST_DIR.exists():
+    app.mount("/admin-static", StaticFiles(directory=ADMIN_DIST_DIR), name="admin_static")
 
 
 @app.get("/")
@@ -59,3 +93,25 @@ async def root():
 async def health_check():
     """健康检查"""
     return {"status": "healthy"}
+
+
+@app.get("/admin", include_in_schema=False)
+async def admin_index():
+    """管理后台首页。"""
+    if not ADMIN_INDEX_PATH.exists():
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Admin UI is not built yet. Run `npm install && npm run build` in admin-ui."},
+        )
+    return FileResponse(ADMIN_INDEX_PATH)
+
+
+@app.get("/setup", include_in_schema=False)
+async def setup_index():
+    """首次安装向导页面。"""
+    if not ADMIN_INDEX_PATH.exists():
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Admin UI is not built yet. Run `npm install && npm run build` in admin-ui."},
+        )
+    return FileResponse(ADMIN_INDEX_PATH)

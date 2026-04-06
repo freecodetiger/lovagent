@@ -4,29 +4,46 @@
 
 import httpx
 from collections import defaultdict
+import re
 from typing import Optional, List, Dict, Tuple
-from app.config import settings
+from app.services.runtime_config_service import runtime_config_service
 
 
 class GLMService:
     """智谱对话模型服务"""
 
     def __init__(self):
-        self.api_key = settings.zhipu_api_key
-        self.model = settings.zhipu_model
-        self.thinking_type = settings.zhipu_thinking_type
-        self.base_url = settings.zhipu_base_url
+        pass
+
+    def _current_config(self) -> Dict:
+        return runtime_config_service.get_effective_model_config()
 
     async def _request_completion(self, payload: Dict) -> Dict:
         """请求对话补全接口并返回 JSON 结果。"""
-        url = f"{self.base_url}/chat/completions"
+        config = self._current_config()
+        url = f"{config['zhipu_base_url']}/chat/completions"
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {config['zhipu_api_key']}",
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    async def _request_web_search(self, payload: Dict) -> Dict:
+        """请求智谱 Web Search 接口并返回 JSON 结果。"""
+        config = self._current_config()
+        url = f"{config['zhipu_base_url']}/web_search"
+
+        headers = {
+            "Authorization": f"Bearer {config['zhipu_api_key']}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             return response.json()
@@ -63,15 +80,16 @@ class GLMService:
         Returns:
             生成的回复内容
         """
+        config = self._current_config()
         payload = {
-            "model": self.model,
+            "model": config["zhipu_model"],
             "messages": messages,
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
         }
-        if self.thinking_type in {"enabled", "disabled"}:
-            payload["thinking"] = {"type": self.thinking_type}
+        if config["zhipu_thinking_type"] in {"enabled", "disabled"}:
+            payload["thinking"] = {"type": config["zhipu_thinking_type"]}
 
         result = await self._request_completion(payload)
         content, reasoning_content, finish_reason = self._extract_message(result)
@@ -127,6 +145,151 @@ class GLMService:
             top_p=top_p,
             max_tokens=max_tokens,
         )
+
+    async def web_search(
+        self,
+        query: str,
+        search_engine: Optional[str] = None,
+        search_count: Optional[int] = None,
+        content_size: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """调用智谱 Web Search 接口。"""
+        cleaned_query = self._build_search_query(query)
+        if not cleaned_query:
+            return []
+
+        config = self._current_config()
+        payload = {
+            "search_query": cleaned_query,
+            "search_engine": search_engine or config["zhipu_web_search_engine"],
+            "search_intent": False,
+            "count": search_count or config["zhipu_web_search_count"],
+            "content_size": content_size or config["zhipu_web_search_content_size"],
+        }
+        result = await self._request_web_search(payload)
+        items = result.get("search_result") or result.get("results") or []
+        if not isinstance(items, list):
+            return []
+
+        normalized: List[Dict[str, str]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            title = str(item.get("title") or "").strip()
+            link = str(item.get("link") or item.get("url") or "").strip()
+            content = str(item.get("content") or item.get("snippet") or item.get("text") or "").strip()
+            media = str(item.get("media") or item.get("site_name") or "").strip()
+            publish_date = str(item.get("publish_date") or item.get("date") or "").strip()
+
+            if not any([title, content, link]):
+                continue
+
+            normalized.append(
+                {
+                    "title": title,
+                    "link": link,
+                    "content": content,
+                    "media": media,
+                    "publish_date": publish_date,
+                }
+            )
+
+        return normalized
+
+    async def maybe_collect_web_context(self, user_message: str) -> Dict[str, object]:
+        """根据用户消息判断是否需要联网检索，并返回搜索结果。"""
+        config = self._current_config()
+        if not config["zhipu_web_search_enabled"] or not self.should_use_web_search(user_message):
+            return {"enabled": config["zhipu_web_search_enabled"], "triggered": False, "query": "", "results": []}
+
+        query = self._build_search_query(user_message)
+        if not query:
+            return {"enabled": config["zhipu_web_search_enabled"], "triggered": False, "query": "", "results": []}
+
+        results = await self.web_search(query)
+        return {
+            "enabled": config["zhipu_web_search_enabled"],
+            "triggered": bool(results),
+            "query": query,
+            "results": results,
+        }
+
+    def should_use_web_search(self, text: str) -> bool:
+        """启发式判断当前消息是否需要联网检索。"""
+        cleaned = text.strip()
+        if len(cleaned) < 2:
+            return False
+
+        explicit_markers = (
+            "查一下",
+            "搜一下",
+            "搜索",
+            "帮我查",
+            "帮我搜",
+            "是什么",
+            "什么意思",
+            "科普",
+            "介绍一下",
+            "解释一下",
+            "这个词",
+            "这个概念",
+            "这个人",
+            "这个公司",
+            "这个品牌",
+            "这是什么",
+            "谁是",
+            "谁啊",
+        )
+        freshness_markers = (
+            "最新",
+            "最近",
+            "今天",
+            "刚刚",
+            "新闻",
+            "发布",
+            "价格",
+            "汇率",
+            "股价",
+            "比赛",
+            "比分",
+            "天气",
+        )
+        emotional_chat_markers = (
+            "想你",
+            "爱你",
+            "抱抱",
+            "亲亲",
+            "在吗",
+            "晚安",
+            "早安",
+            "宝贝",
+            "陪我",
+        )
+        question_markers = ("?", "？", "吗", "呢", "么", "怎么", "为什么")
+
+        if any(marker in cleaned for marker in explicit_markers):
+            return True
+        if any(marker in cleaned for marker in emotional_chat_markers):
+            return False
+        if any(marker in cleaned for marker in freshness_markers):
+            return True
+
+        ascii_tokens = re.findall(r"[A-Za-z][A-Za-z0-9.+_/-]{1,24}", cleaned)
+        if ascii_tokens and (any(marker in cleaned for marker in question_markers) or len(cleaned) <= 32):
+            return True
+
+        concept_patterns = (
+            r".{0,12}叫.{0,18}吗",
+            r".{0,18}啥意思",
+            r".{0,18}是什么梗",
+            r".{0,18}是什么东西",
+        )
+        return any(re.search(pattern, cleaned) for pattern in concept_patterns)
+
+    def _build_search_query(self, text: str) -> str:
+        cleaned = " ".join(text.strip().split())
+        return cleaned[:80]
 
     async def analyze_emotion(self, text: str) -> Dict[str, float]:
         """
