@@ -176,7 +176,10 @@ async def build_preview_payload(payload: PreviewRequest) -> Dict:
     context_messages = []
 
     if payload.wecom_user_id:
-        user_memory = await memory_service.get_user_memory(payload.wecom_user_id)
+        user_memory = await memory_service.get_user_memory(
+            payload.wecom_user_id,
+            query_text=payload.user_message,
+        )
         if user_memory:
             context = await memory_service.get_conversation_context(payload.wecom_user_id)
             recent_agent_replies = await memory_service.get_recent_agent_replies(payload.wecom_user_id, limit=3)

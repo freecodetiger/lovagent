@@ -8,12 +8,38 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 from app.config import settings
 from app.services.runtime_config_service import runtime_config_service
 
 
-PUBLIC_URL_PATTERN = re.compile(r"https://[A-Za-z0-9._-]+(?:trycloudflare\.com|[A-Za-z0-9.-]+)")
+QUICK_TUNNEL_URL_PATTERN = re.compile(r"https://[A-Za-z0-9-]+\.trycloudflare\.com\b")
+INVALID_AUTODETECTED_TUNNEL_HOSTS = {
+    "github.com",
+    "www.github.com",
+    "developers.cloudflare.com",
+    "www.cloudflare.com",
+}
+
+
+def extract_quick_tunnel_url(text: str) -> str:
+    match = QUICK_TUNNEL_URL_PATTERN.search(text)
+    if not match:
+        return ""
+    return match.group(0).rstrip("/")
+
+
+def is_quick_tunnel_url(url: str) -> bool:
+    normalized = url.strip().rstrip("/")
+    return bool(normalized and QUICK_TUNNEL_URL_PATTERN.fullmatch(normalized))
+
+
+def is_invalid_autodetected_tunnel_url(url: str) -> bool:
+    normalized = url.strip()
+    if not normalized:
+        return False
+    return urlparse(normalized).netloc.lower() in INVALID_AUTODETECTED_TUNNEL_HOSTS
 
 
 class TunnelService:
@@ -41,11 +67,10 @@ class TunnelService:
 
     def get_status(self) -> Dict:
         process_running = self._process is not None and self._process.poll() is None
-        public_url = self._public_url or runtime_config_service.get_effective_public_base_url()
         return {
             "available": self.is_available(),
             "running": process_running,
-            "public_url": public_url,
+            "public_url": self._public_url if is_quick_tunnel_url(self._public_url) else "",
             "binary_path": self._find_binary() or "",
         }
 
@@ -58,6 +83,7 @@ class TunnelService:
             if not binary:
                 return self.get_status()
 
+            self._public_url = ""
             command = [
                 binary,
                 "tunnel",
@@ -98,13 +124,20 @@ class TunnelService:
             return
 
         for line in process.stdout:
-            match = PUBLIC_URL_PATTERN.search(line)
-            if not match:
+            public_url = extract_quick_tunnel_url(line)
+            if not public_url:
                 continue
 
-            public_url = match.group(0).rstrip("/")
             self._public_url = public_url
-            runtime_config_service.save_section("deployment", {"public_base_url": public_url})
+            print(f"🌐 Cloudflare Quick Tunnel: {public_url}")
+
+            configured_public_base_url = runtime_config_service.get_effective_public_base_url()
+            if (
+                not configured_public_base_url
+                or is_quick_tunnel_url(configured_public_base_url)
+                or is_invalid_autodetected_tunnel_url(configured_public_base_url)
+            ):
+                runtime_config_service.save_section("deployment", {"public_base_url": public_url})
 
 
 tunnel_service = TunnelService()

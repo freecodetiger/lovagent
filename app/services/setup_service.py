@@ -9,35 +9,65 @@ import httpx
 from app.config import settings
 from app.services.llm_service import glm_service
 from app.services.runtime_config_service import runtime_config_service
-from app.services.tunnel_service import tunnel_service
+from app.services.tunnel_service import (
+    is_invalid_autodetected_tunnel_url,
+    is_quick_tunnel_url,
+    tunnel_service,
+)
 from app.services.wecom_service import wecom_service
 
 
 class SetupService:
     """聚合初始化状态与校验逻辑。"""
 
+    def _resolve_public_base_url(self, tunnel_status: Dict) -> str:
+        configured_public_base_url = runtime_config_service.get_effective_public_base_url().strip().rstrip("/")
+        tunnel_public_url = str(tunnel_status.get("public_url") or "").strip().rstrip("/")
+
+        if tunnel_public_url and (
+            not configured_public_base_url
+            or is_quick_tunnel_url(configured_public_base_url)
+            or is_invalid_autodetected_tunnel_url(configured_public_base_url)
+        ):
+            return tunnel_public_url
+
+        return configured_public_base_url
+
+    def _build_callback_url(self, public_base_url: str) -> str:
+        if public_base_url:
+            return f"{public_base_url.rstrip('/')}/wecom/callback"
+        return f"http://{settings.server_host}:{settings.server_port}/wecom/callback"
+
     def get_status(self) -> Dict:
         status = runtime_config_service.get_status_payload()
-        if not status["current"]["public_base_url"]:
+        if (
+            not status["current"]["public_base_url"]
+            or is_quick_tunnel_url(status["current"]["public_base_url"])
+            or is_invalid_autodetected_tunnel_url(status["current"]["public_base_url"])
+        ):
             tunnel_service.ensure_started()
 
-        status["tunnel"] = tunnel_service.get_status()
-        if status["tunnel"]["public_url"] and not status["current"]["public_base_url"]:
-            status = runtime_config_service.get_status_payload()
-            status["tunnel"] = tunnel_service.get_status()
+        tunnel_status = tunnel_service.get_status()
+        resolved_public_base_url = self._resolve_public_base_url(tunnel_status)
+        status["tunnel"] = tunnel_status
+        status["current"]["public_base_url"] = resolved_public_base_url
+        status["current"]["callback_url"] = self._build_callback_url(resolved_public_base_url)
+        status["sections"]["deployment_configured"] = bool(resolved_public_base_url)
+        status["setup_completed"] = all(status["sections"].values())
         return status
 
     async def validate(self) -> Dict:
         status = self.get_status()
+        public_base_url = status["current"]["public_base_url"]
         checks = {
             "local_health": await self._check_local_health(),
-            "public_health": await self._check_public_health(),
+            "public_health": await self._check_public_health(public_base_url),
             "model": await self._check_model(),
             "wecom": self._check_wecom(),
         }
         checks["callback"] = {
-            "ok": bool(runtime_config_service.get_effective_public_base_url()),
-            "detail": runtime_config_service.get_callback_url(),
+            "ok": bool(public_base_url),
+            "detail": self._build_callback_url(public_base_url),
         }
 
         return {
@@ -56,8 +86,7 @@ class SetupService:
         except Exception as exc:
             return {"ok": False, "detail": f"{url} -> {exc}"}
 
-    async def _check_public_health(self) -> Dict:
-        public_base_url = runtime_config_service.get_effective_public_base_url()
+    async def _check_public_health(self, public_base_url: str) -> Dict:
         if not public_base_url:
             return {"ok": False, "detail": "未获取到公网 HTTPS 地址"}
 

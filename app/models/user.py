@@ -3,9 +3,10 @@
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Float, ForeignKey, Boolean
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, declared_attr
+from sqlalchemy.orm import relationship
 
 Base = declarative_base()
 
@@ -40,8 +41,10 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
 
     # 关系
-    conversations = relationship("Conversation", back_populates="user")
-    emotion_states = relationship("EmotionState", back_populates="user")
+    conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
+    emotion_states = relationship("EmotionState", back_populates="user", cascade="all, delete-orphan")
+    short_term_memories = relationship("ShortTermMemory", back_populates="user", cascade="all, delete-orphan")
+    memory_items = relationship("MemoryItem", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, wecom_user_id={self.wecom_user_id})>"
@@ -137,5 +140,36 @@ class ShortTermMemory(Base):
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
 
+    user = relationship("User", back_populates="short_term_memories")
+
     def __repr__(self):
         return f"<ShortTermMemory(id={self.id}, user_id={self.user_id})>"
+
+
+class MemoryItem(Base):
+    """长期记忆条目模型。"""
+
+    __tablename__ = "memory_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", name="fk_memory_item_user"), nullable=False, comment="用户ID")
+    content = Column(Text, nullable=False, comment="记忆内容")
+    memory_type = Column(String(32), nullable=False, comment="记忆类型")
+    salience = Column(Integer, default=50, comment="重要性 0-100")
+    confidence = Column(Integer, default=50, comment="置信度 0-100")
+    keywords = Column(JSON, comment="关键词")
+    entity_tags = Column(JSON, comment="实体标签")
+    time_tags = Column(JSON, comment="时间标签")
+    source_conversation_id = Column(
+        Integer,
+        ForeignKey("conversations.id", name="fk_memory_item_conversation"),
+        comment="来源对话ID",
+    )
+    last_used_at = Column(DateTime, comment="最近一次被召回时间")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+    user = relationship("User", back_populates="memory_items")
+
+    def __repr__(self):
+        return f"<MemoryItem(id={self.id}, user_id={self.user_id}, type={self.memory_type})>"

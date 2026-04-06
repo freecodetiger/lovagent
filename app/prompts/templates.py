@@ -318,10 +318,15 @@ def build_user_memory_section(user_profile: Optional[Dict]) -> str:
     emotional_patterns = user_profile.get("emotional_patterns") or {}
     milestones = user_profile.get("relationship_milestones") or []
     preferences = user_profile.get("preferences") or {}
+    short_term_memory = user_profile.get("short_term_memory") or {}
+    memory_items = user_profile.get("memory_items") or []
 
     nickname = user_profile.get("nickname") or ""
     if nickname:
+        lines.append("## Structured Memory")
         lines.append(f"- 用户昵称：{nickname}")
+    elif basic_info or emotional_patterns or preferences or milestones:
+        lines.append("## Structured Memory")
 
     for key, value in basic_info.items():
         formatted = _stringify_memory_value(value)
@@ -342,6 +347,20 @@ def build_user_memory_section(user_profile: Optional[Dict]) -> str:
         formatted = _stringify_memory_value(item)
         if formatted:
             lines.append(f"- 关系里程碑 {index}：{formatted}")
+
+    short_term_lines = _build_short_term_memory_lines(short_term_memory)
+    if short_term_lines:
+        if lines:
+            lines.append("")
+        lines.append("## Short-Term Memory")
+        lines.extend(short_term_lines)
+
+    memory_item_lines = _build_memory_item_lines(memory_items)
+    if memory_item_lines:
+        if lines:
+            lines.append("")
+        lines.append("## Relevant Memory Items")
+        lines.extend(memory_item_lines)
 
     return "\n".join(lines) if lines else "暂无可用的用户记忆。"
 
@@ -395,3 +414,53 @@ def _stringify_memory_value(value: object) -> str:
                 parts.append(f"{key}:{cleaned}")
         return "；".join(parts)
     return str(value).strip()
+
+
+def _build_short_term_memory_lines(short_term_memory: Dict) -> List[str]:
+    if not short_term_memory:
+        return []
+
+    lines: List[str] = []
+    summary = _stringify_memory_value(short_term_memory.get("conversation_summary"))
+    if summary:
+        lines.append(f"- 今日摘要：{summary}")
+
+    emotion_trend = _stringify_memory_value(short_term_memory.get("emotion_trend"))
+    if emotion_trend:
+        lines.append(f"- 最近情绪走势：{emotion_trend}")
+
+    today_chat_count = short_term_memory.get("today_chat_count")
+    if today_chat_count:
+        lines.append(f"- 今日互动次数：{today_chat_count}")
+
+    user_mood_today = _stringify_memory_value(short_term_memory.get("user_mood_today"))
+    if user_mood_today:
+        lines.append(f"- 今日主导心情：{user_mood_today}")
+
+    for label, key in (
+        ("待跟进事项", "pending_topics"),
+        ("近期烦恼", "user_worries"),
+        ("近期开心事", "user_joys"),
+    ):
+        formatted = _stringify_memory_value(short_term_memory.get(key))
+        if formatted:
+            lines.append(f"- {label}：{formatted}")
+
+    return lines
+
+
+def _build_memory_item_lines(memory_items: List[Dict]) -> List[str]:
+    lines: List[str] = []
+    for item in memory_items[:6]:
+        if not isinstance(item, dict):
+            continue
+        content = _stringify_memory_value(item.get("content"))
+        if not content:
+            continue
+        memory_type = _stringify_memory_value(item.get("type")) or "memory"
+        confidence = item.get("confidence")
+        if confidence is not None:
+            lines.append(f"- [{memory_type}] {content} (置信度: {confidence})")
+        else:
+            lines.append(f"- [{memory_type}] {content}")
+    return lines

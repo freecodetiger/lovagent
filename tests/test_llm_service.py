@@ -157,6 +157,38 @@ class GLMServiceTests(unittest.TestCase):
         self.assertNotIn("search_count", payload)
         self.assertEqual(payload["search_intent"], False)
 
+    def test_parse_memory_extraction_result_accepts_fenced_json(self):
+        service = GLMService()
+
+        parsed = service._parse_memory_extraction_result(
+            """```json
+            {
+              "identity_facts": [{"key": "work_type", "value": "设计师", "confidence": 0.9, "keywords": ["设计师"]}],
+              "preferences": [],
+              "worries": [{"content": "最近有点焦虑", "confidence": 0.8, "keywords": ["焦虑"]}],
+              "milestones": [],
+              "taboos": [],
+              "followups": [{"content": "明天复盘", "confidence": 0.7, "keywords": ["明天"]}],
+              "short_term_summary": "最近有点焦虑，明天要复盘。",
+              "emotion_trend": "焦虑",
+              "user_joys": ["今天下班早"]
+            }
+            ```"""
+        )
+
+        self.assertEqual(parsed["identity_facts"][0]["value"], "设计师")
+        self.assertEqual(parsed["worries"][0]["content"], "最近有点焦虑")
+        self.assertEqual(parsed["followups"][0]["content"], "明天复盘")
+        self.assertEqual(parsed["emotion_trend"], "焦虑")
+        self.assertEqual(parsed["user_joys"], ["今天下班早"])
+
+    def test_parse_memory_extraction_result_returns_empty_on_invalid_json(self):
+        service = GLMService()
+
+        parsed = service._parse_memory_extraction_result("not-json")
+
+        self.assertEqual(parsed, service._empty_memory_extraction_result())
+
 
 if __name__ == "__main__":
     unittest.main()

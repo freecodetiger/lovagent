@@ -124,7 +124,7 @@ async def wecom_callback_handler(
 
     # 4. 获取记忆上下文
     context = await memory_service.get_conversation_context(user_id)
-    user_memory = await memory_service.get_user_memory(user_id)
+    user_memory = await memory_service.get_user_memory(user_id, query_text=user_content)
     recent_agent_replies = await memory_service.get_recent_agent_replies(user_id, limit=3)
     web_search_context = await glm_service.maybe_collect_web_context(user_content)
 
@@ -191,8 +191,16 @@ async def wecom_callback_handler(
         agent_response = choose_natural_fallback_reply(user_content, user_emotion)
 
     # 7. 保存对话记录
-    await memory_service.save_conversation(
+    conversation_id = await memory_service.save_conversation(
         user_id=user_id,
+        user_message=user_content,
+        agent_message=agent_response,
+        user_emotion=user_emotion,
+        agent_emotion=agent_emotion,
+    )
+    memory_service.schedule_memory_processing(
+        wecom_user_id=user_id,
+        conversation_id=conversation_id,
         user_message=user_content,
         agent_message=agent_response,
         user_emotion=user_emotion,

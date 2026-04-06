@@ -71,6 +71,43 @@ class PromptTemplateTests(unittest.TestCase):
         self.assertIn("AlphaFold - DeepMind", prompt)
         self.assertIn("优先参考检索结果，不要编造", prompt)
 
+    def test_build_dynamic_prompt_includes_short_term_and_relevant_memory_items(self):
+        prompt = build_dynamic_prompt(
+            user_input="明天面试有点紧张",
+            user_emotion={"anxiety": 0.8, "neutral": 0.2},
+            agent_emotion={"current_mood": "caring", "intensity": 62},
+            context={},
+            current_time="2026-04-06 20:00:00",
+            user_profile={
+                "nickname": "阿周",
+                "basic_info": {"work_type": "产品经理"},
+                "emotional_patterns": {"recent_emotion_trend": "焦虑"},
+                "relationship_milestones": ["上周第一次一起看电影"],
+                "preferences": {"likes": ["日料"]},
+                "short_term_memory": {
+                    "conversation_summary": "最近在等面试结果，也有点担心表现。",
+                    "pending_topics": ["明天面试结果出来"],
+                    "emotion_trend": "焦虑",
+                    "today_chat_count": 3,
+                    "user_mood_today": "anxiety",
+                    "user_worries": ["面试结果"],
+                    "user_joys": ["上周一起看电影"],
+                },
+                "memory_items": [
+                    {"type": "todo_followup", "content": "明天面试结果出来", "confidence": 88},
+                    {"type": "preference", "content": "偏好/likes：日料", "confidence": 80},
+                ],
+            },
+        )
+
+        self.assertIn("## Structured Memory", prompt)
+        self.assertIn("## Short-Term Memory", prompt)
+        self.assertIn("今日摘要：最近在等面试结果，也有点担心表现。", prompt)
+        self.assertIn("待跟进事项：明天面试结果出来", prompt)
+        self.assertIn("## Relevant Memory Items", prompt)
+        self.assertIn("[todo_followup] 明天面试结果出来", prompt)
+        self.assertIn("[preference] 偏好/likes：日料", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

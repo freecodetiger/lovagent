@@ -15,7 +15,11 @@ from app.config import settings
 from app.models.database import init_db
 from app.routers import admin, setup, wecom
 from app.services.proactive_chat_service import proactive_chat_service
-from app.services.tunnel_service import tunnel_service
+from app.services.tunnel_service import (
+    is_invalid_autodetected_tunnel_url,
+    is_quick_tunnel_url,
+    tunnel_service,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,10 +32,21 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时的初始化逻辑
     init_db()
+    tunnel_service.ensure_started()
+    tunnel_status = tunnel_service.get_status()
+    callback_base_url = tunnel_status["public_url"]
+    configured_public_base_url = settings.public_base_url.strip().rstrip("/")
+    if not callback_base_url and configured_public_base_url:
+        if not is_quick_tunnel_url(configured_public_base_url) and not is_invalid_autodetected_tunnel_url(configured_public_base_url):
+            callback_base_url = configured_public_base_url
+    callback_url = (
+        f"{callback_base_url}/wecom/callback"
+        if callback_base_url
+        else f"http://{settings.server_host}:{settings.server_port}/wecom/callback"
+    )
     print(f"🚀 恋爱 Agent 启动中...")
     print(f"📍 服务地址: http://{settings.server_host}:{settings.server_port}")
-    print(f"🔗 企业微信回调地址: {settings.wecom_callback_url}")
-    tunnel_service.ensure_started()
+    print(f"🔗 企业微信回调地址: {callback_url}")
     proactive_scheduler_task = asyncio.create_task(proactive_chat_service.scheduler_loop())
 
     yield
