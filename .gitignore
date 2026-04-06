@@ -69,3 +69,5 @@ cloudflared
 admin-ui/node_modules/
 admin-ui/dist/
 admin-ui/*.tsbuildinfo
+!admin-ui/src/lib/
+!admin-ui/src/lib/*.ts
