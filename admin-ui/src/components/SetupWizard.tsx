@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { SetupStatus, SetupValidationResult } from "../types";
 
+const GLM_PLATFORM_URL = "https://open.bigmodel.cn/";
+const WECOM_ADMIN_URL = "https://work.weixin.qq.com/";
+
 type SetupWizardProps = {
   initialStatus: SetupStatus;
   onStatusChange: (status: SetupStatus) => void;
@@ -285,6 +288,15 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
                 <span>后端已接入 Web Search 触发逻辑，提到概念、新闻、价格等问题时会自动走检索。</span>
               </div>
             </div>
+            <div className="setup-guide-card">
+              <div className="setup-guide-header">
+                <strong>先去官方平台获取 API Key</strong>
+                <a className="setup-link" href={GLM_PLATFORM_URL} target="_blank" rel="noreferrer">
+                  打开智谱开放平台
+                </a>
+              </div>
+              <p>登录后在智谱开放平台控制台中创建或查看 API Key，再回到这里粘贴即可。</p>
+            </div>
           </section>
 
           <section className="panel setup-panel contrast-panel">
@@ -326,6 +338,15 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
               <span className="tiny-tag">{initialStatus.tunnel.public_url || "等待 tunnel 返回公网地址"}</span>
             </div>
             <p className="setup-code-line">{callbackUrl === "/wecom/callback" ? "回调地址待生成" : callbackUrl}</p>
+            <div className="setup-guide-card dark-guide-card">
+              <strong>企业微信白名单提醒</strong>
+              <p>
+                如果客户端消息能进来，但 Agent 回复发送失败，优先检查企业微信的可信 IP / IP 白名单。
+              </p>
+              <p>
+                在当前部署机器执行 <code>curl https://api.ipify.org</code>，拿到公网出口 IP 后，再去企业微信后台补到白名单。
+              </p>
+            </div>
           </section>
 
           <section className="panel setup-panel">
@@ -377,6 +398,21 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
                 />
               </label>
             </div>
+            <div className="setup-guide-card">
+              <div className="setup-guide-header">
+                <strong>企业微信后台操作路径</strong>
+                <a className="setup-link" href={WECOM_ADMIN_URL} target="_blank" rel="noreferrer">
+                  打开企业微信管理后台
+                </a>
+              </div>
+              <ul className="setup-guide-list">
+                <li>先登录企业微信网页版后台，创建企业的“自建应用”。</li>
+                <li>企业 ID 在首页的“认证主体信息”中获取。</li>
+                <li>AgentID 和 Secret 在“应用管理”里的自建应用详情页中获取。</li>
+                <li>在“接收消息”功能块里点“设置 API 接收”，填写上面的回调 URL。</li>
+                <li>保存 API 接收配置后，把 Token 和 EncodingAESKey 回填到这里。</li>
+              </ul>
+            </div>
           </section>
 
           <section className="panel setup-panel">
@@ -399,6 +435,11 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
                 placeholder={initialStatus.current.has_admin_password ? "已配置，可输入后重新覆盖" : "至少 6 位"}
               />
             </label>
+            <div className="default-password-card">
+              <strong>默认管理员密码</strong>
+              <code>lovagent-admin</code>
+              <span>如果你还没改过，角色调音台登录页默认就是这个密码。</span>
+            </div>
             <p className="hero-copy">密码会保存到数据库运行时配置中；如果你已经保存过，留空不会展示旧值。</p>
           </section>
         </div>

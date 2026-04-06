@@ -572,7 +572,10 @@ select:focus {
 .metric-tile span,
 .validation-card p,
 .setup-hint-card span,
-.setup-code-line {
+.setup-code-line,
+.default-password-card span,
+.setup-guide-card p,
+.setup-guide-list {
   color: var(--muted);
 }
 
@@ -616,6 +619,75 @@ select:focus {
 .setup-hint-card {
   align-content: start;
   background: linear-gradient(135deg, rgba(58, 123, 213, 0.08), rgba(255, 255, 255, 0.76));
+}
+
+.setup-guide-card,
+.default-password-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(31, 27, 24, 0.08);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.setup-guide-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.setup-link {
+  color: var(--sky);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.setup-link:hover {
+  text-decoration: underline;
+}
+
+.setup-guide-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.default-password-card code {
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(31, 27, 24, 0.08);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.prominent-default-password {
+  margin-top: 0;
+  margin-bottom: 18px;
+  background: linear-gradient(135deg, rgba(234, 110, 79, 0.12), rgba(255, 255, 255, 0.9));
+}
+
+.dark-guide-card {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.dark-guide-card strong,
+.dark-guide-card p,
+.dark-guide-card code {
+  color: #fff9f0;
+}
+
+.dark-guide-card code {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .setup-code-line {

@@ -29,6 +29,11 @@ export function LoginShell(props: LoginShellProps) {
         <form className="login-card" onSubmit={onSubmit}>
           <span className="panel-chip">Admin Gate</span>
           <h2>进入后台</h2>
+          <div className="default-password-card prominent-default-password">
+            <strong>默认管理员密码</strong>
+            <code>lovagent-admin</code>
+            <span>如果你还没有在 setup 或后台里修改过密码，先用这个登录。</span>
+          </div>
           <label className="field">
             <span>管理员密码</span>
             <input
