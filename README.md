@@ -1,43 +1,44 @@
 # LovAgent
 
-基于企业微信回调、GLM 大模型和本地记忆系统的恋爱 Agent。仓库内置独立前端控制台，可直接在浏览器里调整系统人设、回复长度、用户记忆、主动聊天策略，以及首次部署所需的运行参数。
+基于企业微信回调、GLM 和本地记忆系统的恋爱 Agent。项目现在默认提供网页安装向导，用户不需要先手改 `.env`，启动后直接打开 `/setup` 完成配置即可。
 
-## 现在的部署方式
+## 依赖清单
 
-这个仓库已经改成了“网页向导为主，命令行为辅”的启动流：
+必需：
 
-- 首次启动后访问 `http://127.0.0.1:8000/setup`
-- 在网页里填写 GLM API Key、企业微信参数、管理员密码
-- 如本机存在 `cloudflared`，后端会自动拉起 Quick Tunnel，并把公网地址写入运行时配置
-- 配置保存在数据库里，默认不要求手改 `.env`
+- `Git`
+- `Python 3.10+`
+- `Node.js 18+`
 
-仍然需要你手动提供的企业微信信息：
+按需：
 
-- 企业 ID `corp_id`
-- 自建应用 `agent_id`
-- 自建应用 `secret`
-- 回调配置里的 `token`
-- 回调配置里的 `encoding_aes_key`
+- `cloudflared`
+  需要企业微信公网回调时建议安装。没有它也能先本地启动、进入 `/setup`、配置参数，只是暂时收不到公网回调。
+- `Docker Desktop` 或 `Docker Engine + Docker Compose`
+  如果你想走容器部署而不是本地脚本。
 
-企业微信后台本身不提供完整的一键自动配置能力，所以真正的“零操作”不可行；但本仓库已经把本地部署、参数保存、连通性校验和回调地址生成尽量收敛成一次 setup wizard。
+默认启动时，项目会直接使用已构建的前端静态文件并由 FastAPI 提供页面：
 
-## 快速开始
+- 日常启动只需要 Python 虚拟环境
+- 只有在你想跑前端热更新开发时，才需要额外启动 `5173`
 
-### 方式 1：Docker Compose
+## 你需要提前准备的业务参数
 
-```bash
-git clone https://github.com/freecodetiger/lovagent.git
-cd lovagent
-docker compose up --build
-```
+企业微信部分不能自动代办，用户仍需自己提供：
 
-启动后打开：
+- `corp_id`
+- `agent_id`
+- `secret`
+- `token`
+- `encoding_aes_key`
 
-- `http://127.0.0.1:8000/setup`
+GLM 部分需要：
 
-容器内会构建前端并运行 FastAPI，SQLite 数据库默认持久化在 `lovagent_data` volume 中。
+- `zhipu_api_key`
 
-### 方式 2：本地脚本
+## 最简启动
+
+### Linux / macOS
 
 ```bash
 git clone https://github.com/freecodetiger/lovagent.git
@@ -49,80 +50,143 @@ cd lovagent
 启动后打开：
 
 - `http://127.0.0.1:8000/setup`
-- `http://127.0.0.1:5173`（前端开发服务器）
 
-停止本地开发进程：
+停止服务：
 
 ```bash
 ./scripts/dev-down.sh
 ```
 
-## Setup Wizard 里需要填什么
+如果你在做前端开发，需要热更新，再用：
 
-### GLM
+```bash
+./scripts/dev-up.sh --dev-ui
+```
 
-- `zhipu_api_key`
-- `zhipu_model`，默认 `glm-5`
+此时额外可用：
 
-### 企业微信
+- `http://127.0.0.1:5173`
 
-- `corp_id`
-- `agent_id`
-- `secret`
-- `token`
-- `encoding_aes_key`
+### Windows PowerShell
 
-### 回调地址
+建议使用 PowerShell 运行。
 
-向导会展示：
+```powershell
+git clone https://github.com/freecodetiger/lovagent.git
+cd lovagent
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\bootstrap.ps1
+.\scripts\dev-up.ps1
+```
 
-- 当前 Tunnel 公网地址
-- 最终回调地址 `https://<public-base-url>/wecom/callback`
+启动后打开：
 
-你只需要把这个完整 URL 回填到企业微信后台的“接收消息服务器配置”。
+- `http://127.0.0.1:8000/setup`
+
+停止服务：
+
+```powershell
+.\scripts\dev-down.ps1
+```
+
+如果你在做前端开发，需要热更新：
+
+```powershell
+.\scripts\dev-up.ps1 -DevUI
+```
+
+## Docker 启动
+
+```bash
+git clone https://github.com/freecodetiger/lovagent.git
+cd lovagent
+docker compose up --build
+```
+
+启动后打开：
+
+- `http://127.0.0.1:8000/setup`
+
+如果 Docker 报 `Cannot connect to the Docker daemon`，先启动 Docker Desktop 或 Docker daemon。
+
+## Setup Wizard 做什么
+
+打开 `http://127.0.0.1:8000/setup` 后，按顺序完成：
+
+1. 填 GLM API Key 和模型
+2. 填企业微信参数
+3. 确认公网回调地址
+4. 设置管理员密码
+5. 点“校验并进入后台”
+
+如果本机有 `cloudflared`，后端会优先尝试自动拉起 Quick Tunnel，并把公网地址显示在 setup 页面中。
 
 ## Cloudflare Tunnel
 
-项目默认优先使用 `cloudflared` Quick Tunnel。
+如果你需要真正接收企业微信回调，建议安装 `cloudflared`。
 
-如果本机已安装 `cloudflared`，或者你运行过 `./scripts/bootstrap.sh` 下载了二进制，后端启动时会尝试自动拉起 tunnel，并在 setup 页面展示当前公网地址。
+Linux / macOS：
 
-如果 tunnel 地址变了，需要重新到企业微信后台保存新的回调 URL。
+- `scripts/bootstrap.sh` 会尝试自动下载一份到 `.tools/bin/cloudflared`
 
-## 独立前端控制台
+Windows：
 
-初始化完成后，访问：
+- 建议手动安装
+- 可直接执行：
+
+```powershell
+winget install Cloudflare.cloudflared
+```
+
+## 管理后台
+
+初始化完成后，使用：
 
 - `http://127.0.0.1:8000/admin`
 
-可视化控制项包括：
+可视化调整：
 
-- 系统 Prompt / 全局人格
-- 回复字数档位
-- 单用户记忆
+- 系统 Prompt / 人设
+- 回复长度
+- 用户记忆
 - 主动聊天策略
 - 回复预览
 
-## 环境变量
+## 常见问题
 
-仓库保留了 [`.env.example`](/home/zpc/projects/lovagent/.env.example)，但它现在只作为可选覆盖项：
+### `127.0.0.1:8000` 拒绝连接
 
-- 你可以完全依赖 setup wizard
-- 也可以继续用 `.env` 做传统部署
+通常是后端没起来。先看：
 
-生产环境建议至少显式设置：
+- `./.run/backend.log`
 
-- `DATABASE_PATH`
-- `ADMIN_SESSION_SECRET`
+或 Windows：
 
-## 验证与排障
+- `.run\backend.log`
 
-Setup Wizard 内置一键校验，会检查：
+最常见原因是：
 
-- 本地 `/health`
-- 公网 `/health`
-- GLM 调用
-- 企业微信 `access_token`
-- 回调地址是否已生成
+- Python 版本低于 `3.10`
+- 首次安装时依赖没装完整
 
-更完整的部署步骤、企业微信侧说明和排障建议见 [guide.md](/home/zpc/projects/lovagent/guide.md)。
+### `127.0.0.1:5173` 能打开，但 `/setup` 打不开
+
+说明 Vite 起了，但 FastAPI 没起。正常使用时请优先访问：
+
+- `http://127.0.0.1:8000/setup`
+
+### 没装 `cloudflared` 能不能先启动
+
+可以。你仍然可以：
+
+- 打开 `/setup`
+- 配置 GLM
+- 配置企业微信参数
+- 进入后台
+
+只是没有公网 HTTPS 地址时，企业微信回调暂时无法联通。
+
+## 额外说明
+
+- `.env.example` 现在是可选覆盖项，不是必填前置步骤
+- 更详细的部署说明和排障可看 [guide.md](/home/zpc/projects/lovagent/guide.md)

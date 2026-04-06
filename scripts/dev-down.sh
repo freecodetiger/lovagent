@@ -13,8 +13,11 @@ stop_pid_file() {
   local pid
   pid="$(cat "${pid_file}")"
   if kill -0 "${pid}" 2>/dev/null; then
-    kill "${pid}"
-    wait "${pid}" 2>/dev/null || true
+    kill "${pid}" 2>/dev/null || true
+    sleep 1
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
   fi
 
   rm -f "${pid_file}"
