@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CHECK_SCRIPT="${ROOT_DIR}/scripts/check-env.sh"
 RUN_DIR="${ROOT_DIR}/.run"
 VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 ADMIN_DIR="${ROOT_DIR}/admin-ui"
@@ -18,6 +19,7 @@ while (($# > 0)); do
     -h|--help)
       cat <<'EOF'
 用法：
+  scripts/check-env.sh --run
   scripts/dev-up.sh
   scripts/dev-up.sh --dev-ui
 
@@ -52,6 +54,12 @@ cleanup_stale_pid "${RUN_DIR}/frontend.pid"
 if [[ ! -x "${VENV_PYTHON}" ]]; then
   echo "缺少 .venv，请先执行 scripts/bootstrap.sh"
   exit 1
+fi
+
+if [[ "${ENABLE_DEV_UI}" == "true" ]]; then
+  "${CHECK_SCRIPT}" --dev-ui
+else
+  "${CHECK_SCRIPT}" --run
 fi
 
 if ! "${VENV_PYTHON}" - <<'PY' >/dev/null 2>&1

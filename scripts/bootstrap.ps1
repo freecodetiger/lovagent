@@ -2,12 +2,15 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RootDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$CheckScript = Join-Path $RootDir "scripts\check-env.ps1"
 $ToolsDir = Join-Path $RootDir ".tools\bin"
 $VenvDir = Join-Path $RootDir ".venv"
 $AdminDir = Join-Path $RootDir "admin-ui"
 $DistIndex = Join-Path $AdminDir "dist\index.html"
 
 New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+
+& $CheckScript -Mode Bootstrap
 
 function Test-PythonVersion {
     param([string[]]$CommandParts)

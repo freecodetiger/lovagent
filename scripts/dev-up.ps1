@@ -6,6 +6,7 @@ param(
 )
 
 $RootDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$CheckScript = Join-Path $RootDir "scripts\check-env.ps1"
 $RunDir = Join-Path $RootDir ".run"
 $AdminDir = Join-Path $RootDir "admin-ui"
 $VenvPython = Join-Path $RootDir ".venv\Scripts\python.exe"
@@ -37,6 +38,12 @@ Remove-StalePid (Join-Path $RunDir "frontend.pid")
 
 if (-not (Test-Path $VenvPython)) {
     throw "缺少 .venv，请先执行 .\scripts\bootstrap.ps1"
+}
+
+if ($DevUI) {
+    & $CheckScript -Mode DevUI
+} else {
+    & $CheckScript -Mode Run
 }
 
 & $VenvPython -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" | Out-Null

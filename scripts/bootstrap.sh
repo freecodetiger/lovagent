@@ -2,12 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CHECK_SCRIPT="${ROOT_DIR}/scripts/check-env.sh"
 TOOLS_DIR="${ROOT_DIR}/.tools/bin"
 VENV_DIR="${ROOT_DIR}/.venv"
 ADMIN_DIR="${ROOT_DIR}/admin-ui"
 DIST_INDEX="${ADMIN_DIR}/dist/index.html"
 
 mkdir -p "${TOOLS_DIR}"
+
+"${CHECK_SCRIPT}" --bootstrap
 
 log() {
   printf '%s\n' "$1"
