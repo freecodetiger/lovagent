@@ -1,4 +1,4 @@
-import type { ProactiveChatConfig, UserSummary } from "../types";
+﻿import type { ProactiveChatConfig, UserSummary } from "../types";
 
 type ProactiveStudioProps = {
   config: ProactiveChatConfig;
@@ -9,7 +9,7 @@ type ProactiveStudioProps = {
   previewReply: string;
   deliveryStatus: string;
   onToggleEnabled: (value: boolean) => void;
-  onTargetUserChange: (value: string) => void;
+  onTargetUserChange: (channel: string, externalUserId: string) => void;
   onWindowToggle: (key: string, enabled: boolean) => void;
   onWindowTimeChange: (key: string, value: string) => void;
   onQuietHoursToggle: (value: boolean) => void;
@@ -43,6 +43,8 @@ export function ProactiveStudio(props: ProactiveStudioProps) {
     onRunOnce,
   } = props;
 
+  const targetValue = config.target_external_user_id ? `${config.target_channel}::${config.target_external_user_id}` : "";
+
   return (
     <div className="studio-grid">
       <section className="panel aurora-panel">
@@ -64,11 +66,22 @@ export function ProactiveStudio(props: ProactiveStudioProps) {
 
           <label className="field">
             <span>目标用户</span>
-            <select value={config.target_wecom_user_id} onChange={(event) => onTargetUserChange(event.target.value)}>
+            <select
+              value={targetValue}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (!value) {
+                  onTargetUserChange("wecom", "");
+                  return;
+                }
+                const [channel, externalUserId] = value.split("::", 2);
+                onTargetUserChange(channel || "wecom", externalUserId || "");
+              }}
+            >
               <option value="">请选择用户</option>
               {users.map((user) => (
-                <option key={user.wecom_user_id} value={user.wecom_user_id}>
-                  {user.nickname || user.wecom_user_id}
+                <option key={`${user.channel}:${user.external_user_id}`} value={`${user.channel}::${user.external_user_id}`}>
+                  {user.nickname || user.external_user_id} ({user.channel})
                 </option>
               ))}
             </select>
@@ -109,11 +122,7 @@ export function ProactiveStudio(props: ProactiveStudioProps) {
 
           <label className="toggle-field">
             <span>启用免打扰</span>
-            <input
-              type="checkbox"
-              checked={config.quiet_hours.enabled}
-              onChange={(event) => onQuietHoursToggle(event.target.checked)}
-            />
+            <input type="checkbox" checked={config.quiet_hours.enabled} onChange={(event) => onQuietHoursToggle(event.target.checked)} />
           </label>
 
           <label className="field">
@@ -135,7 +144,7 @@ export function ProactiveStudio(props: ProactiveStudioProps) {
         <section className="response-preferences">
           <div className="tag-editor-header">
             <h3>固定时段窗口</h3>
-            <span>每个窗口当天最多主动发起一次，仍受免打扰与间隔约束</span>
+            <span>每个窗口当天最多主动发起一次，仍受免打扰与间隔约束。</span>
           </div>
           <div className="editor-grid">
             {config.scheduled_windows.map((window) => (
@@ -165,10 +174,10 @@ export function ProactiveStudio(props: ProactiveStudioProps) {
         <p className="panel-chip">当前发送状态：{deliveryStatus || "尚未触发"}</p>
 
         <div className="preview-actions">
-          <button className="secondary-button" onClick={onPreview} disabled={busy || !config.target_wecom_user_id}>
+          <button className="secondary-button" onClick={onPreview} disabled={busy || !config.target_external_user_id}>
             {busy ? "处理中..." : "预览主动开场"}
           </button>
-          <button className="primary-button" onClick={onRunOnce} disabled={busy || !config.target_wecom_user_id}>
+          <button className="primary-button" onClick={onRunOnce} disabled={busy || !config.target_external_user_id}>
             {busy ? "处理中..." : "立即发一条"}
           </button>
         </div>
