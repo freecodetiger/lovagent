@@ -76,10 +76,22 @@ class ProactiveChatActionRequest(BaseModel):
     wecom_user_id: Optional[str] = None
 
 
+class SetupOpenAIModelsPayload(BaseModel):
+    chat_model: str = ""
+    memory_model: str = ""
+    proactive_model: str = ""
+
+
 class SetupModelPayload(BaseModel):
+    model_provider: str = "glm"
     zhipu_api_key: str = ""
     zhipu_model: str = "glm-5"
     zhipu_thinking_type: str = "disabled"
+    openai_api_key: str = ""
+    openai_base_url: str = ""
+    openai_model_mode: str = "manual"
+    openai_model: str = ""
+    openai_models: SetupOpenAIModelsPayload = Field(default_factory=SetupOpenAIModelsPayload)
 
 
 class SetupWeComPayload(BaseModel):

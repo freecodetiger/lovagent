@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     zhipu_web_search_engine: str = os.getenv("ZHIPU_WEB_SEARCH_ENGINE", "search_std")
     zhipu_web_search_count: int = int(os.getenv("ZHIPU_WEB_SEARCH_COUNT", "4"))
     zhipu_web_search_content_size: str = os.getenv("ZHIPU_WEB_SEARCH_CONTENT_SIZE", "medium")
+    model_provider: str = os.getenv("MODEL_PROVIDER", "glm")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     # 数据库配置
     database_type: str = os.getenv("DATABASE_TYPE", "sqlite")

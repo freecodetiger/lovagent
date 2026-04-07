@@ -18,6 +18,40 @@ def _require_setup_write_access(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Admin authentication required")
 
 
+def _validate_model_payload(payload: SetupModelPayload) -> None:
+    provider = payload.model_provider.strip().lower() or "glm"
+    if provider not in {"glm", "openai", "openai_compatible"}:
+        raise HTTPException(status_code=400, detail="不支持的模型供应商")
+
+    if provider == "glm":
+        if not payload.zhipu_api_key.strip():
+            raise HTTPException(status_code=400, detail="GLM 模式下必须填写 API Key")
+        if not payload.zhipu_model.strip():
+            raise HTTPException(status_code=400, detail="GLM 模式下必须填写模型名称")
+        return
+
+    if not payload.openai_api_key.strip():
+        raise HTTPException(status_code=400, detail="OpenAI-compatible 模式下必须填写 API Key")
+    if not payload.openai_base_url.strip():
+        raise HTTPException(status_code=400, detail="OpenAI-compatible 模式下必须填写 Base URL")
+
+    mode = payload.openai_model_mode.strip().lower() or "manual"
+    if mode not in {"manual", "auto"}:
+        raise HTTPException(status_code=400, detail="不支持的模型模式")
+
+    if mode == "manual":
+        if not payload.openai_model.strip():
+            raise HTTPException(status_code=400, detail="手动模式下必须填写模型名称")
+        return
+
+    if not payload.openai_models.chat_model.strip():
+        raise HTTPException(status_code=400, detail="Auto 模式下必须填写聊天模型")
+    if not payload.openai_models.memory_model.strip():
+        raise HTTPException(status_code=400, detail="Auto 模式下必须填写记忆模型")
+    if not payload.openai_models.proactive_model.strip():
+        raise HTTPException(status_code=400, detail="Auto 模式下必须填写主动消息模型")
+
+
 @router.get("/status")
 async def get_setup_status():
     return setup_service.get_status()
@@ -26,7 +60,25 @@ async def get_setup_status():
 @router.put("/config/model")
 async def save_setup_model(payload: SetupModelPayload, request: Request):
     _require_setup_write_access(request)
-    runtime_config_service.save_section("model", payload.model_dump())
+    _validate_model_payload(payload)
+    runtime_config_service.save_section(
+        "model",
+        {
+            "model_provider": payload.model_provider.strip(),
+            "zhipu_api_key": payload.zhipu_api_key.strip(),
+            "zhipu_model": payload.zhipu_model.strip(),
+            "zhipu_thinking_type": payload.zhipu_thinking_type.strip(),
+            "openai_api_key": payload.openai_api_key.strip(),
+            "openai_base_url": payload.openai_base_url.strip().rstrip("/"),
+            "openai_model_mode": payload.openai_model_mode.strip(),
+            "openai_model": payload.openai_model.strip(),
+            "openai_models": {
+                "chat_model": payload.openai_models.chat_model.strip(),
+                "memory_model": payload.openai_models.memory_model.strip(),
+                "proactive_model": payload.openai_models.proactive_model.strip(),
+            },
+        },
+    )
     return setup_service.get_status()
 
 

@@ -107,6 +107,16 @@ export type ProactiveChatResponse = {
   };
 };
 
+export type SetupModelProvider = "glm" | "openai_compatible";
+
+export type SetupModelMode = "manual" | "auto";
+
+export type SetupModelRouting = {
+  chat_model: string;
+  memory_model: string;
+  proactive_model: string;
+};
+
 export type SetupStatus = {
   setup_completed: boolean;
   sections: {
@@ -116,12 +126,18 @@ export type SetupStatus = {
     deployment_configured: boolean;
   };
   current: {
+    model_provider: SetupModelProvider;
     zhipu_model: string;
+    openai_model_mode: SetupModelMode;
+    openai_base_url: string;
+    openai_model: string;
+    openai_models: SetupModelRouting;
     public_base_url: string;
     callback_url: string;
     wecom_corp_id: string;
     wecom_agent_id: string;
     has_zhipu_api_key: boolean;
+    has_openai_api_key: boolean;
     has_wecom_secret: boolean;
     has_wecom_token: boolean;
     has_wecom_encoding_aes_key: boolean;
@@ -129,8 +145,14 @@ export type SetupStatus = {
   };
   raw: {
     model: {
+      model_provider: SetupModelProvider;
       zhipu_model: string;
+      openai_model_mode: SetupModelMode;
+      openai_base_url: string;
+      openai_model: string;
+      openai_models: SetupModelRouting;
       has_zhipu_api_key: boolean;
+      has_openai_api_key: boolean;
     };
     wecom: {
       corp_id: string;

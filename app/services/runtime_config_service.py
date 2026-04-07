@@ -17,9 +17,19 @@ RUNTIME_CONFIG_KEY = "setup_runtime_config"
 
 DEFAULT_RUNTIME_CONFIG = {
     "model": {
+        "model_provider": "glm",
         "zhipu_api_key": "",
         "zhipu_model": "glm-5",
         "zhipu_thinking_type": "disabled",
+        "openai_api_key": "",
+        "openai_base_url": "",
+        "openai_model_mode": "manual",
+        "openai_model": "",
+        "openai_models": {
+            "chat_model": "",
+            "memory_model": "",
+            "proactive_model": "",
+        },
     },
     "wecom": {
         "corp_id": "",
@@ -40,6 +50,31 @@ DEFAULT_RUNTIME_CONFIG = {
 class RuntimeConfigService:
     """读写安装向导运行时配置。"""
 
+    def _normalize_model_section(self, incoming: Dict | None) -> Dict:
+        defaults = deepcopy(DEFAULT_RUNTIME_CONFIG["model"])
+        source = incoming if isinstance(incoming, dict) else {}
+
+        defaults["model_provider"] = str(source.get("model_provider", defaults["model_provider"]) or defaults["model_provider"])
+        defaults["zhipu_api_key"] = str(source.get("zhipu_api_key", defaults["zhipu_api_key"]) or "")
+        defaults["zhipu_model"] = str(source.get("zhipu_model", defaults["zhipu_model"]) or defaults["zhipu_model"])
+        defaults["zhipu_thinking_type"] = str(
+            source.get("zhipu_thinking_type", defaults["zhipu_thinking_type"]) or defaults["zhipu_thinking_type"]
+        )
+        defaults["openai_api_key"] = str(source.get("openai_api_key", defaults["openai_api_key"]) or "")
+        defaults["openai_base_url"] = str(source.get("openai_base_url", defaults["openai_base_url"]) or "")
+        defaults["openai_model_mode"] = str(
+            source.get("openai_model_mode", defaults["openai_model_mode"]) or defaults["openai_model_mode"]
+        )
+        defaults["openai_model"] = str(source.get("openai_model", defaults["openai_model"]) or "")
+
+        incoming_models = source.get("openai_models") if isinstance(source.get("openai_models"), dict) else {}
+        defaults["openai_models"] = {
+            "chat_model": str(incoming_models.get("chat_model") or ""),
+            "memory_model": str(incoming_models.get("memory_model") or ""),
+            "proactive_model": str(incoming_models.get("proactive_model") or ""),
+        }
+        return defaults
+
     def get_config(self) -> Dict:
         db = SessionLocal()
         try:
@@ -59,7 +94,9 @@ class RuntimeConfigService:
             value = record.config_value or {}
             for section, defaults in DEFAULT_RUNTIME_CONFIG.items():
                 incoming = value.get(section) if isinstance(value, dict) else {}
-                if isinstance(incoming, dict):
+                if section == "model":
+                    merged[section] = self._normalize_model_section(incoming if isinstance(incoming, dict) else {})
+                elif isinstance(incoming, dict):
                     merged[section].update({key: incoming.get(key, fallback) for key, fallback in defaults.items()})
             return merged
         finally:
@@ -98,7 +135,14 @@ class RuntimeConfigService:
 
     def get_effective_model_config(self) -> Dict:
         config = self.get_config()["model"]
+        openai_model = config["openai_model"] or settings.openai_model
+        openai_models = {
+            "chat_model": str((config.get("openai_models") or {}).get("chat_model") or openai_model),
+            "memory_model": str((config.get("openai_models") or {}).get("memory_model") or openai_model),
+            "proactive_model": str((config.get("openai_models") or {}).get("proactive_model") or openai_model),
+        }
         return {
+            "model_provider": config["model_provider"] or settings.model_provider,
             "zhipu_api_key": config["zhipu_api_key"] or settings.zhipu_api_key,
             "zhipu_model": config["zhipu_model"] or settings.zhipu_model,
             "zhipu_thinking_type": config["zhipu_thinking_type"] or settings.zhipu_thinking_type,
@@ -107,7 +151,33 @@ class RuntimeConfigService:
             "zhipu_web_search_engine": settings.zhipu_web_search_engine,
             "zhipu_web_search_count": settings.zhipu_web_search_count,
             "zhipu_web_search_content_size": settings.zhipu_web_search_content_size,
+            "openai_api_key": config["openai_api_key"] or settings.openai_api_key,
+            "openai_base_url": config["openai_base_url"] or settings.openai_base_url,
+            "openai_model_mode": config["openai_model_mode"] or "manual",
+            "openai_model": openai_model,
+            "openai_models": openai_models,
         }
+
+    def is_model_configured(self) -> bool:
+        model = self.get_effective_model_config()
+        provider = str(model.get("model_provider") or "glm").strip().lower()
+        if provider in {"", "glm"}:
+            return bool(model["zhipu_api_key"] and model["zhipu_model"])
+
+        if provider in {"openai", "openai_compatible"}:
+            if not (model["openai_api_key"] and model["openai_base_url"]):
+                return False
+
+            mode = str(model.get("openai_model_mode") or "manual").strip().lower()
+            if mode == "auto":
+                routed = model.get("openai_models") or {}
+                return all(
+                    str(routed.get(key) or "").strip()
+                    for key in ("chat_model", "memory_model", "proactive_model")
+                )
+            return bool(str(model.get("openai_model") or "").strip())
+
+        return False
 
     def get_effective_wecom_config(self) -> Dict:
         config = self.get_config()["wecom"]
@@ -134,13 +204,12 @@ class RuntimeConfigService:
         return f"http://{settings.server_host}:{settings.server_port}/wecom/callback"
 
     def is_setup_complete(self) -> bool:
-        model = self.get_effective_model_config()
         wecom = self.get_effective_wecom_config()
         public_base_url = self.get_effective_public_base_url()
         admin_password = self.get_effective_admin_password()
         return all(
             [
-                model["zhipu_api_key"],
+                self.is_model_configured(),
                 wecom["corp_id"],
                 wecom["agent_id"],
                 wecom["secret"],
@@ -161,7 +230,7 @@ class RuntimeConfigService:
         return {
             "setup_completed": self.is_setup_complete(),
             "sections": {
-                "model_configured": bool(effective_model["zhipu_api_key"]),
+                "model_configured": self.is_model_configured(),
                 "wecom_configured": all(
                     [
                         effective_wecom["corp_id"],
@@ -175,12 +244,18 @@ class RuntimeConfigService:
                 "deployment_configured": bool(effective_public_base_url),
             },
             "current": {
+                "model_provider": effective_model["model_provider"],
                 "zhipu_model": effective_model["zhipu_model"],
+                "openai_model_mode": effective_model["openai_model_mode"],
+                "openai_base_url": effective_model["openai_base_url"],
+                "openai_model": effective_model["openai_model"],
+                "openai_models": deepcopy(effective_model["openai_models"]),
                 "public_base_url": effective_public_base_url,
                 "callback_url": self.get_callback_url(),
                 "wecom_corp_id": effective_wecom["corp_id"],
                 "wecom_agent_id": effective_wecom["agent_id"],
                 "has_zhipu_api_key": bool(effective_model["zhipu_api_key"]),
+                "has_openai_api_key": bool(effective_model["openai_api_key"]),
                 "has_wecom_secret": bool(effective_wecom["secret"]),
                 "has_wecom_token": bool(effective_wecom["token"]),
                 "has_wecom_encoding_aes_key": bool(effective_wecom["encoding_aes_key"]),
@@ -188,8 +263,14 @@ class RuntimeConfigService:
             },
             "raw": {
                 "model": {
+                    "model_provider": raw["model"]["model_provider"],
                     "zhipu_model": raw["model"]["zhipu_model"],
+                    "openai_model_mode": raw["model"]["openai_model_mode"],
+                    "openai_base_url": raw["model"]["openai_base_url"],
+                    "openai_model": raw["model"]["openai_model"],
+                    "openai_models": deepcopy(raw["model"]["openai_models"]),
                     "has_zhipu_api_key": bool(raw["model"]["zhipu_api_key"]),
+                    "has_openai_api_key": bool(raw["model"]["openai_api_key"]),
                 },
                 "wecom": {
                     "corp_id": raw["wecom"]["corp_id"],

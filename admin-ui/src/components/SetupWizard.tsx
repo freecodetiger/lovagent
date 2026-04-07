@@ -1,20 +1,29 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import type { SetupStatus, SetupValidationResult } from "../types";
+import type { SetupModelMode, SetupModelProvider, SetupStatus, SetupValidationResult } from "../types";
 
 const GLM_PLATFORM_URL = "https://open.bigmodel.cn/";
 const WECOM_ADMIN_URL = "https://work.weixin.qq.com/";
 
 type SetupWizardProps = {
   initialStatus: SetupStatus;
+  authenticated: boolean;
   onStatusChange: (status: SetupStatus) => void;
   onEnterAdmin: () => void;
 };
 
 type SetupFormState = {
+  model_provider: SetupModelProvider;
   zhipu_api_key: string;
   zhipu_model: string;
+  openai_api_key: string;
+  openai_base_url: string;
+  openai_model_mode: SetupModelMode;
+  openai_model: string;
+  chat_model: string;
+  memory_model: string;
+  proactive_model: string;
   corp_id: string;
   agent_id: string;
   secret: string;
@@ -25,8 +34,16 @@ type SetupFormState = {
 };
 
 const DEFAULT_FORM_STATE: SetupFormState = {
+  model_provider: "glm",
   zhipu_api_key: "",
   zhipu_model: "glm-5",
+  openai_api_key: "",
+  openai_base_url: "",
+  openai_model_mode: "manual",
+  openai_model: "",
+  chat_model: "",
+  memory_model: "",
+  proactive_model: "",
   corp_id: "",
   agent_id: "",
   secret: "",
@@ -39,14 +56,51 @@ const DEFAULT_FORM_STATE: SetupFormState = {
 function buildFormState(status: SetupStatus): SetupFormState {
   return {
     ...DEFAULT_FORM_STATE,
+    model_provider: status.current.model_provider || "glm",
     zhipu_model: status.current.zhipu_model || "glm-5",
+    openai_base_url: status.current.openai_base_url || status.raw.model.openai_base_url || "",
+    openai_model_mode: status.current.openai_model_mode || status.raw.model.openai_model_mode || "manual",
+    openai_model: status.current.openai_model || status.raw.model.openai_model || "",
+    chat_model: status.current.openai_models?.chat_model || status.raw.model.openai_models?.chat_model || "",
+    memory_model: status.current.openai_models?.memory_model || status.raw.model.openai_models?.memory_model || "",
+    proactive_model: status.current.openai_models?.proactive_model || status.raw.model.openai_models?.proactive_model || "",
     corp_id: status.current.wecom_corp_id || status.raw.wecom.corp_id || "",
     agent_id: status.current.wecom_agent_id || status.raw.wecom.agent_id || "",
     public_base_url: status.current.public_base_url || status.tunnel.public_url || "",
   };
 }
 
-export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: SetupWizardProps) {
+function buildModelSummary(status: SetupStatus): string {
+  if (status.current.model_provider === "openai_compatible") {
+    if (status.current.openai_model_mode === "auto") {
+      return `OpenAI-compatible / auto`;
+    }
+    return `OpenAI-compatible / ${status.current.openai_model || "未设置模型"}`;
+  }
+  return `GLM / ${status.current.zhipu_model || "glm-5"}`;
+}
+
+function buildModelDraftSummary(form: SetupFormState): string[] {
+  if (form.model_provider === "glm") {
+    return [`当前将使用 GLM`, `主模型：${form.zhipu_model || "未填写"}`, "保存后即时生效，无需重启后端"];
+  }
+
+  if (form.openai_model_mode === "auto") {
+    return [
+      "当前将使用 OpenAI-compatible / Auto 路由",
+      `聊天：${form.chat_model || "未填写"} / 记忆：${form.memory_model || "未填写"} / 主动消息：${form.proactive_model || "未填写"}`,
+      "保存后即时生效，无需重启后端",
+    ];
+  }
+
+  return [
+    "当前将使用 OpenAI-compatible / 手动模式",
+    `统一模型：${form.openai_model || "未填写"}`,
+    "保存后即时生效，无需重启后端",
+  ];
+}
+
+export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEnterAdmin }: SetupWizardProps) {
   const [form, setForm] = useState<SetupFormState>(() => buildFormState(initialStatus));
   const [statusMessage, setStatusMessage] = useState("");
   const [savingSection, setSavingSection] = useState<"" | "model" | "wecom" | "admin">("");
@@ -57,7 +111,20 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
   useEffect(() => {
     setForm((current) => ({
       ...current,
+      model_provider: initialStatus.current.model_provider || current.model_provider || "glm",
       zhipu_model: initialStatus.current.zhipu_model || current.zhipu_model || "glm-5",
+      openai_base_url: current.openai_base_url || initialStatus.current.openai_base_url || initialStatus.raw.model.openai_base_url || "",
+      openai_model_mode: initialStatus.current.openai_model_mode || current.openai_model_mode || "manual",
+      openai_model: current.openai_model || initialStatus.current.openai_model || initialStatus.raw.model.openai_model || "",
+      chat_model:
+        current.chat_model || initialStatus.current.openai_models?.chat_model || initialStatus.raw.model.openai_models?.chat_model || "",
+      memory_model:
+        current.memory_model || initialStatus.current.openai_models?.memory_model || initialStatus.raw.model.openai_models?.memory_model || "",
+      proactive_model:
+        current.proactive_model ||
+        initialStatus.current.openai_models?.proactive_model ||
+        initialStatus.raw.model.openai_models?.proactive_model ||
+        "",
       corp_id: current.corp_id || initialStatus.current.wecom_corp_id || initialStatus.raw.wecom.corp_id || "",
       agent_id: current.agent_id || initialStatus.current.wecom_agent_id || initialStatus.raw.wecom.agent_id || "",
       public_base_url:
@@ -72,6 +139,40 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
     }));
   }
 
+  function validateModelForm(): string {
+    if (form.model_provider === "glm") {
+      if (!form.zhipu_api_key.trim() && !initialStatus.current.has_zhipu_api_key) {
+        return "GLM 模式下请先填写 API Key。";
+      }
+      if (!form.zhipu_model.trim()) {
+        return "GLM 模式下请填写模型名称。";
+      }
+      return "";
+    }
+
+    if (!form.openai_api_key.trim() && !initialStatus.current.has_openai_api_key) {
+      return "OpenAI-compatible 模式下请先填写 API Key。";
+    }
+    if (!form.openai_base_url.trim()) {
+      return "OpenAI-compatible 模式下请填写 Base URL。";
+    }
+    if (form.openai_model_mode === "manual" && !form.openai_model.trim()) {
+      return "手动模式下请填写模型名称。";
+    }
+    if (form.openai_model_mode === "auto") {
+      if (!form.chat_model.trim()) {
+        return "Auto 模式下请填写聊天模型。";
+      }
+      if (!form.memory_model.trim()) {
+        return "Auto 模式下请填写记忆模型。";
+      }
+      if (!form.proactive_model.trim()) {
+        return "Auto 模式下请填写主动消息模型。";
+      }
+    }
+    return "";
+  }
+
   async function refreshStatus() {
     const nextStatus = await api.getSetupStatus();
     onStatusChange(nextStatus);
@@ -81,14 +182,30 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
   async function handleSaveModel() {
     setSavingSection("model");
     setStatusMessage("");
+    const validationMessage = validateModelForm();
+    if (validationMessage) {
+      setStatusMessage(validationMessage);
+      setSavingSection("");
+      return;
+    }
     try {
       const nextStatus = await api.saveSetupModel({
+        model_provider: form.model_provider,
         zhipu_api_key: form.zhipu_api_key,
         zhipu_model: form.zhipu_model,
         zhipu_thinking_type: "disabled",
+        openai_api_key: form.openai_api_key,
+        openai_base_url: form.openai_base_url,
+        openai_model_mode: form.openai_model_mode,
+        openai_model: form.openai_model,
+        openai_models: {
+          chat_model: form.chat_model,
+          memory_model: form.memory_model,
+          proactive_model: form.proactive_model,
+        },
       });
       onStatusChange(nextStatus);
-      setStatusMessage("GLM 配置已保存。");
+      setStatusMessage("模型配置已保存。");
     } catch (error) {
       setStatusMessage((error as Error).message);
     } finally {
@@ -173,14 +290,14 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
   const callbackUrl = `${(form.public_base_url || initialStatus.current.public_base_url || "").replace(/\/$/, "")}/wecom/callback`;
   const setupCompleted = initialStatus.setup_completed;
 
-  if (setupCompleted) {
+  if (setupCompleted && !authenticated) {
     return (
       <main className="shell setup-shell">
         <section className="hero-panel setup-hero">
           <p className="eyebrow">LovAgent Setup</p>
           <h1>当前实例已经初始化完成</h1>
           <p className="hero-copy">
-            如果你需要继续调整人格、记忆、主动聊天和回复长度，请进入管理后台。运行时参数已经保存在数据库里。
+            当前运行时参数已经生效。如果你要继续调整模型、回调地址或企业微信参数，请先进入后台登录管理员账号。
           </p>
           <div className="setup-progress single-column">
             <article className="setup-step-card done">
@@ -188,13 +305,13 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
               <span>{initialStatus.current.callback_url}</span>
             </article>
             <article className="setup-step-card done">
-              <strong>GLM 模型</strong>
-              <span>{initialStatus.current.zhipu_model}</span>
+              <strong>当前模型</strong>
+              <span>{buildModelSummary(initialStatus)}</span>
             </article>
           </div>
           <div className="setup-inline-actions">
             <button className="primary-button" onClick={onEnterAdmin}>
-              进入后台
+              进入后台登录
             </button>
             <button className="ghost-button" onClick={() => void refreshStatus()}>
               刷新状态
@@ -211,7 +328,9 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
         <p className="eyebrow">LovAgent Setup</p>
         <h1>五分钟把恋爱 Agent 接起来</h1>
         <p className="hero-copy">
-          只填 GLM、企业微信和管理员密码。公网地址默认优先走 Cloudflare Tunnel，保存后立即写入数据库，不需要手改
+          {setupCompleted
+            ? "当前实例已经初始化完成。你现在看到的是可继续编辑的运行时配置页，保存后立即生效，不需要重启后端。"
+            : "只填模型、企业微信和管理员密码。公网地址默认优先走 Cloudflare Tunnel，保存后立即写入数据库，不需要手改"}
           <code> .env </code>。
         </p>
         <div className="setup-progress">
@@ -246,7 +365,7 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
             </button>
             {setupCompleted ? (
               <button className="primary-button" onClick={onEnterAdmin}>
-                进入后台
+                返回后台
               </button>
             ) : null}
           </div>
@@ -259,43 +378,139 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
             <div className="section-header">
               <div>
                 <p className="section-kicker">Model</p>
-                <h3>GLM 接入</h3>
+                <h3>模型接入</h3>
               </div>
               <button className="primary-button" onClick={() => void handleSaveModel()} disabled={savingSection === "model"}>
                 {savingSection === "model" ? "保存中..." : "保存模型配置"}
               </button>
             </div>
             <div className="field-grid">
-              <label className="field field-span">
-                <span>GLM API Key</span>
-                <input
-                  type="password"
-                  value={form.zhipu_api_key}
-                  onChange={(event) => updateField("zhipu_api_key", event.target.value)}
-                  placeholder={initialStatus.current.has_zhipu_api_key ? "已配置，可重新覆盖" : "输入智谱 API Key"}
-                />
-              </label>
               <label className="field">
-                <span>模型名称</span>
-                <select value={form.zhipu_model} onChange={(event) => updateField("zhipu_model", event.target.value)}>
-                  <option value="glm-5">glm-5</option>
-                  <option value="glm-4.5">glm-4.5</option>
-                  <option value="glm-4.5-air">glm-4.5-air</option>
+                <span>Provider</span>
+                <select
+                  value={form.model_provider}
+                  onChange={(event) => updateField("model_provider", event.target.value as SetupModelProvider)}
+                >
+                  <option value="glm">GLM</option>
+                  <option value="openai_compatible">OpenAI-compatible</option>
                 </select>
               </label>
-              <div className="setup-hint-card">
-                <strong>联网检索</strong>
-                <span>后端已接入 Web Search 触发逻辑，提到概念、新闻、价格等问题时会自动走检索。</span>
-              </div>
+              {form.model_provider === "glm" ? (
+                <>
+                  <label className="field field-span">
+                    <span>GLM API Key</span>
+                    <input
+                      type="password"
+                      value={form.zhipu_api_key}
+                      onChange={(event) => updateField("zhipu_api_key", event.target.value)}
+                      placeholder={initialStatus.current.has_zhipu_api_key ? "已配置，可重新覆盖" : "输入智谱 API Key"}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>模型名称</span>
+                    <select value={form.zhipu_model} onChange={(event) => updateField("zhipu_model", event.target.value)}>
+                      <option value="glm-5">glm-5</option>
+                      <option value="glm-4.5">glm-4.5</option>
+                      <option value="glm-4.5-air">glm-4.5-air</option>
+                    </select>
+                  </label>
+                  <div className="setup-hint-card">
+                    <strong>联网检索</strong>
+                    <span>GLM provider 下会继续启用现有 Web Search 触发逻辑。</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label className="field field-span">
+                    <span>OpenAI-compatible API Key</span>
+                    <input
+                      type="password"
+                      value={form.openai_api_key}
+                      onChange={(event) => updateField("openai_api_key", event.target.value)}
+                      placeholder={initialStatus.current.has_openai_api_key ? "已配置，可重新覆盖" : "输入兼容接口 API Key"}
+                    />
+                  </label>
+                  <label className="field field-span">
+                    <span>Base URL</span>
+                    <input
+                      value={form.openai_base_url}
+                      onChange={(event) => updateField("openai_base_url", event.target.value)}
+                      placeholder="https://api.example.com/v1"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>模型模式</span>
+                    <select
+                      value={form.openai_model_mode}
+                      onChange={(event) => updateField("openai_model_mode", event.target.value as SetupModelMode)}
+                    >
+                      <option value="manual">手动指定</option>
+                      <option value="auto">Auto 按任务路由</option>
+                    </select>
+                  </label>
+                  {form.openai_model_mode === "manual" ? (
+                    <label className="field">
+                      <span>模型名称</span>
+                      <input
+                        value={form.openai_model}
+                        onChange={(event) => updateField("openai_model", event.target.value)}
+                        placeholder="gpt-4o-mini / qwen-plus / deepseek-chat"
+                      />
+                    </label>
+                  ) : (
+                    <>
+                      <label className="field">
+                        <span>聊天模型</span>
+                        <input
+                          value={form.chat_model}
+                          onChange={(event) => updateField("chat_model", event.target.value)}
+                          placeholder="普通对话 / 回复预览"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>记忆模型</span>
+                        <input
+                          value={form.memory_model}
+                          onChange={(event) => updateField("memory_model", event.target.value)}
+                          placeholder="结构化记忆提炼"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>主动消息模型</span>
+                        <input
+                          value={form.proactive_model}
+                          onChange={(event) => updateField("proactive_model", event.target.value)}
+                          placeholder="主动聊天文案"
+                        />
+                      </label>
+                    </>
+                  )}
+                  <div className="setup-hint-card">
+                    <strong>兼容接口说明</strong>
+                    <span>支持 OpenAI 风格 `/chat/completions` 接口。auto 模式会按聊天、记忆、主动消息三类任务分别选模型。</span>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="setup-model-summary">
+              {buildModelDraftSummary(form).map((line) => (
+                <p key={line}>{line}</p>
+              ))}
             </div>
             <div className="setup-guide-card">
               <div className="setup-guide-header">
-                <strong>先去官方平台获取 API Key</strong>
-                <a className="setup-link" href={GLM_PLATFORM_URL} target="_blank" rel="noreferrer">
-                  打开智谱开放平台
-                </a>
+                <strong>{form.model_provider === "glm" ? "先去官方平台获取 API Key" : "准备兼容接口参数"}</strong>
+                {form.model_provider === "glm" ? (
+                  <a className="setup-link" href={GLM_PLATFORM_URL} target="_blank" rel="noreferrer">
+                    打开智谱开放平台
+                  </a>
+                ) : null}
               </div>
-              <p>登录后在智谱开放平台控制台中创建或查看 API Key，再回到这里粘贴即可。</p>
+              <p>
+                {form.model_provider === "glm"
+                  ? "登录后在智谱开放平台控制台中创建或查看 API Key，再回到这里粘贴即可。"
+                  : "填写任何 OpenAI 风格兼容接口的 Base URL、API Key 和模型名称即可，模型名称支持自由输入。"}
+              </p>
             </div>
           </section>
 
@@ -454,7 +669,7 @@ export function SetupWizard({ initialStatus, onStatusChange, onEnterAdmin }: Set
               {validating ? "校验中..." : "校验并进入后台"}
             </button>
           </div>
-          <p className="hero-copy">会依次检查本地服务、公网健康检查、GLM 调用、企业微信 access_token 和回调地址。</p>
+          <p className="hero-copy">会依次检查本地服务、公网健康检查、当前模型 provider 调用、企业微信 access_token 和回调地址。</p>
 
           {validationResult ? (
             <div className="validation-grid">

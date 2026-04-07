@@ -101,8 +101,11 @@ class SetupService:
 
     async def _check_model(self) -> Dict:
         model_config = runtime_config_service.get_effective_model_config()
-        if not model_config["zhipu_api_key"]:
-            return {"ok": False, "detail": "未配置 GLM API Key"}
+        provider = str(model_config.get("model_provider") or "glm").strip().lower()
+        if not runtime_config_service.is_model_configured():
+            if provider in {"openai", "openai_compatible"}:
+                return {"ok": False, "detail": "未配置完整的 OpenAI-compatible 模型参数"}
+            return {"ok": False, "detail": "未配置完整的 GLM 模型参数"}
 
         try:
             result = await glm_service.chat_completion(
@@ -111,7 +114,8 @@ class SetupService:
                 top_p=0.9,
                 max_tokens=24,
             )
-            return {"ok": bool(result), "detail": result or "模型返回为空"}
+            detail_prefix = "OpenAI-compatible" if provider in {"openai", "openai_compatible"} else "GLM"
+            return {"ok": bool(result), "detail": f"{detail_prefix}: {result or '模型返回为空'}"}
         except Exception as exc:
             return {"ok": False, "detail": str(exc)}
 

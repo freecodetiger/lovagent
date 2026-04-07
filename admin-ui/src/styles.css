@@ -572,6 +572,7 @@ select:focus {
 .metric-tile span,
 .validation-card p,
 .setup-hint-card span,
+.setup-model-summary p,
 .setup-code-line,
 .default-password-card span,
 .setup-guide-card p,
@@ -619,6 +620,20 @@ select:focus {
 .setup-hint-card {
   align-content: start;
   background: linear-gradient(135deg, rgba(58, 123, 213, 0.08), rgba(255, 255, 255, 0.76));
+}
+
+.setup-model-summary {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(58, 123, 213, 0.16);
+  background: linear-gradient(135deg, rgba(58, 123, 213, 0.08), rgba(255, 255, 255, 0.84));
+}
+
+.setup-model-summary p {
+  margin: 0;
 }
 
 .setup-guide-card,

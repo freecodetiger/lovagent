@@ -423,8 +423,16 @@ function App() {
 
   function handleEnterAdmin() {
     window.history.replaceState({}, "", ADMIN_PATH);
-    setAuthenticated(true);
+    if (!authenticated) {
+      setStatusMessage("请先登录管理员后台后再继续编辑配置。");
+      return;
+    }
     setStatusMessage("环境校验完成，已进入管理后台。");
+  }
+
+  function handleOpenSetup() {
+    window.history.replaceState({}, "", SETUP_PATH);
+    setStatusMessage("已进入模型与回调设置页。");
   }
 
   if (!bootstrapped) {
@@ -436,12 +444,24 @@ function App() {
   }
 
   if (!setupStatus.setup_completed) {
-    return <SetupWizard initialStatus={setupStatus} onStatusChange={handleSetupStatusChange} onEnterAdmin={handleEnterAdmin} />;
+    return (
+      <SetupWizard
+        initialStatus={setupStatus}
+        authenticated={authenticated}
+        onStatusChange={handleSetupStatusChange}
+        onEnterAdmin={handleEnterAdmin}
+      />
+    );
   }
 
   if (window.location.pathname === SETUP_PATH) {
     return (
-      <SetupWizard initialStatus={setupStatus} onStatusChange={handleSetupStatusChange} onEnterAdmin={handleEnterAdmin} />
+      <SetupWizard
+        initialStatus={setupStatus}
+        authenticated={authenticated}
+        onStatusChange={handleSetupStatusChange}
+        onEnterAdmin={handleEnterAdmin}
+      />
     );
   }
 
@@ -458,7 +478,11 @@ function App() {
 
   return (
     <main className="shell">
-      <StudioTopbar statusMessage={statusMessage} onLogout={() => void handleLogout()} />
+      <StudioTopbar
+        statusMessage={statusMessage}
+        onOpenSetup={handleOpenSetup}
+        onLogout={() => void handleLogout()}
+      />
       <StudioTabs
         activeTab={activeTab}
         onChange={(tab) => {

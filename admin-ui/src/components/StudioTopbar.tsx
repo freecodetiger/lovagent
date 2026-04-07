@@ -1,9 +1,10 @@
 type StudioTopbarProps = {
   statusMessage: string;
+  onOpenSetup: () => void;
   onLogout: () => void;
 };
 
-export function StudioTopbar({ statusMessage, onLogout }: StudioTopbarProps) {
+export function StudioTopbar({ statusMessage, onOpenSetup, onLogout }: StudioTopbarProps) {
   return (
     <header className="topbar">
       <div>
@@ -14,9 +15,14 @@ export function StudioTopbar({ statusMessage, onLogout }: StudioTopbarProps) {
         <p className="status-banner">
           {statusMessage || "数据库配置实时生效，预览不会发送企业微信消息。"}
         </p>
-        <button className="ghost-button" onClick={onLogout}>
-          退出
-        </button>
+        <div className="setup-inline-actions">
+          <button className="secondary-button" onClick={onOpenSetup}>
+            模型与回调设置
+          </button>
+          <button className="ghost-button" onClick={onLogout}>
+            退出
+          </button>
+        </div>
       </div>
     </header>
   );

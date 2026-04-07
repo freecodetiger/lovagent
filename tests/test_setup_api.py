@@ -28,7 +28,11 @@ class SetupApiTests(unittest.TestCase):
             self.db.commit()
 
         self.settings_patches = contextlib.ExitStack()
+        self.settings_patches.enter_context(patch.object(settings, "model_provider", "glm"))
         self.settings_patches.enter_context(patch.object(settings, "zhipu_api_key", ""))
+        self.settings_patches.enter_context(patch.object(settings, "openai_api_key", ""))
+        self.settings_patches.enter_context(patch.object(settings, "openai_base_url", "https://api.openai.com/v1"))
+        self.settings_patches.enter_context(patch.object(settings, "openai_model", "gpt-4o-mini"))
         self.settings_patches.enter_context(patch.object(settings, "wecom_corp_id", ""))
         self.settings_patches.enter_context(patch.object(settings, "wecom_agent_id", ""))
         self.settings_patches.enter_context(patch.object(settings, "wecom_secret", ""))
@@ -126,6 +130,51 @@ class SetupApiTests(unittest.TestCase):
         self.assertEqual(admin_response.status_code, 200)
         self.assertTrue(admin_response.json()["sections"]["admin_configured"])
         self.assertTrue(admin_response.json()["setup_completed"])
+
+    def test_setup_model_endpoint_supports_openai_compatible_auto_mode(self):
+        ensure_patch, status_patch = self._setup_status_patches()
+        with ensure_patch, status_patch:
+            response = self.client.put(
+                "/setup/config/model",
+                json={
+                    "model_provider": "openai_compatible",
+                    "openai_api_key": "openai-key",
+                    "openai_base_url": "https://openrouter.example.com/v1",
+                    "openai_model_mode": "auto",
+                    "openai_model": "",
+                    "openai_models": {
+                        "chat_model": "chat-x",
+                        "memory_model": "memory-x",
+                        "proactive_model": "proactive-x",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["sections"]["model_configured"])
+        self.assertEqual(payload["current"]["model_provider"], "openai_compatible")
+        self.assertEqual(payload["current"]["openai_model_mode"], "auto")
+        self.assertEqual(payload["current"]["openai_base_url"], "https://openrouter.example.com/v1")
+        self.assertEqual(payload["current"]["openai_models"]["memory_model"], "memory-x")
+        self.assertTrue(payload["current"]["has_openai_api_key"])
+
+    def test_setup_model_endpoint_rejects_incomplete_openai_manual_config(self):
+        ensure_patch, status_patch = self._setup_status_patches()
+        with ensure_patch, status_patch:
+            response = self.client.put(
+                "/setup/config/model",
+                json={
+                    "model_provider": "openai_compatible",
+                    "openai_api_key": "openai-key",
+                    "openai_base_url": "https://openrouter.example.com/v1",
+                    "openai_model_mode": "manual",
+                    "openai_model": "",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "手动模式下必须填写模型名称")
 
     def test_validate_endpoint_returns_structured_checks(self):
         ensure_patch, status_patch = self._setup_status_patches()

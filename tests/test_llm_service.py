@@ -30,6 +30,7 @@ try:
 except ModuleNotFoundError:
     config_stub = types.ModuleType("app.config")
     config_stub.settings = types.SimpleNamespace(
+        model_provider="glm",
         zhipu_api_key="test-key",
         zhipu_model="glm-5",
         zhipu_thinking_type="disabled",
@@ -38,6 +39,9 @@ except ModuleNotFoundError:
         zhipu_web_search_engine="search_std",
         zhipu_web_search_count=4,
         zhipu_web_search_content_size="medium",
+        openai_api_key="",
+        openai_base_url="https://api.openai.com/v1",
+        openai_model="gpt-4o-mini",
     )
     sys.modules["app.config"] = config_stub
 
@@ -188,6 +192,58 @@ class GLMServiceTests(unittest.TestCase):
         parsed = service._parse_memory_extraction_result("not-json")
 
         self.assertEqual(parsed, service._empty_memory_extraction_result())
+
+    def test_chat_completion_uses_manual_openai_compatible_model(self):
+        service = GLMService()
+        provider = types.SimpleNamespace(generate=AsyncMock(return_value=types.SimpleNamespace(content="hello")))
+
+        with (
+            patch.object(
+                service,
+                "_current_config",
+                return_value={
+                    "model_provider": "openai_compatible",
+                    "openai_model_mode": "manual",
+                    "openai_model": "manual-model",
+                },
+            ),
+            patch("app.services.llm_service.get_chat_provider", return_value=provider),
+        ):
+            result = asyncio.run(service.chat_completion(messages=[{"role": "user", "content": "hi"}]))
+
+        self.assertEqual(result, "hello")
+        self.assertEqual(provider.generate.await_args.kwargs["model"], "manual-model")
+
+    def test_chat_completion_uses_auto_routed_openai_model_for_task(self):
+        service = GLMService()
+        provider = types.SimpleNamespace(generate=AsyncMock(return_value=types.SimpleNamespace(content="memory-ok")))
+
+        with (
+            patch.object(
+                service,
+                "_current_config",
+                return_value={
+                    "model_provider": "openai_compatible",
+                    "openai_model_mode": "auto",
+                    "openai_model": "fallback-model",
+                    "openai_models": {
+                        "chat_model": "chat-model",
+                        "memory_model": "memory-model",
+                        "proactive_model": "proactive-model",
+                    },
+                },
+            ),
+            patch("app.services.llm_service.get_chat_provider", return_value=provider),
+        ):
+            result = asyncio.run(
+                service.chat_completion(
+                    messages=[{"role": "user", "content": "hi"}],
+                    task_type="memory",
+                )
+            )
+
+        self.assertEqual(result, "memory-ok")
+        self.assertEqual(provider.generate.await_args.kwargs["model"], "memory-model")
 
 
 if __name__ == "__main__":

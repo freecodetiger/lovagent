@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 
+from app.providers.model_provider import get_chat_provider
 from app.services.runtime_config_service import runtime_config_service
 
 
@@ -20,6 +21,26 @@ class GLMService:
 
     def _current_config(self) -> Dict:
         return runtime_config_service.get_effective_model_config()
+
+    def _current_provider_name(self) -> str:
+        return str(self._current_config().get("model_provider") or "glm").strip().lower()
+
+    def _resolve_chat_model(self, config: Dict, task_type: str) -> str:
+        provider_name = str(config.get("model_provider") or "glm").strip().lower()
+        if provider_name in {"", "glm"}:
+            return str(config.get("zhipu_model") or "").strip()
+
+        mode = str(config.get("openai_model_mode") or "manual").strip().lower()
+        if mode == "auto":
+            routed = config.get("openai_models") or {}
+            task_key = {
+                "chat": "chat_model",
+                "memory": "memory_model",
+                "proactive": "proactive_model",
+            }.get(task_type, "chat_model")
+            return str(routed.get(task_key) or config.get("openai_model") or "").strip()
+
+        return str(config.get("openai_model") or "").strip()
 
     async def _request_completion(self, payload: Dict) -> Dict:
         """请求对话补全接口并返回 JSON 结果。"""
@@ -70,6 +91,7 @@ class GLMService:
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_tokens: int = 2000,
+        task_type: str = "chat",
     ) -> str:
         """
         调用 GLM-5 对话补全 API
@@ -84,6 +106,22 @@ class GLMService:
             生成的回复内容
         """
         config = self._current_config()
+        provider_name = self._current_provider_name()
+
+        if provider_name not in {"", "glm"}:
+            provider = get_chat_provider(config)
+            if provider is None:
+                raise ValueError(f"Unsupported model provider: {provider_name}")
+
+            result = await provider.generate(
+                messages,
+                model=self._resolve_chat_model(config, task_type),
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            )
+            return result.content or ""
+
         payload = {
             "model": config["zhipu_model"],
             "messages": messages,
@@ -119,6 +157,7 @@ class GLMService:
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_tokens: int = 2000,
+        task_type: str = "chat",
     ) -> str:
         """
         带上下文的对话
@@ -147,6 +186,7 @@ class GLMService:
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
+            task_type=task_type,
         )
 
     async def web_search(
@@ -162,6 +202,10 @@ class GLMService:
             return []
 
         config = self._current_config()
+        provider_name = self._current_provider_name()
+        if provider_name not in {"", "glm"}:
+            return []
+
         payload = {
             "search_query": cleaned_query,
             "search_engine": search_engine or config["zhipu_web_search_engine"],
@@ -401,6 +445,7 @@ class GLMService:
                 temperature=0.1,
                 top_p=0.7,
                 max_tokens=700,
+                task_type="memory",
             )
         except Exception:
             return self._empty_memory_extraction_result()

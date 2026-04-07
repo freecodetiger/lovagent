@@ -306,73 +306,18 @@ class MemoryService:
     ) -> None:
         lock = self._user_locks.setdefault(wecom_user_id, asyncio.Lock())
         async with lock:
-            db = SessionLocal()
-            try:
-                user = self._get_user_by_wecom_id(db, wecom_user_id)
-                if not user:
-                    return
+            from app.graph import run_memory_update_graph
 
-                short_term = self._get_or_create_short_term_memory(db, user.id)
-                recent_messages = self._serialize_llm_messages(
-                    self._get_recent_conversations_rows(db, user.id, limit=max(3, self.max_short_term_messages // 2))
-                )
-                existing_memory = self._build_profile_snapshot(
-                    user,
-                    short_term_memory=self._serialize_short_term_memory(short_term),
-                    memory_items=[],
-                )
-            finally:
-                db.close()
-
-            rule_result = self._rule_extract_memory(user_message, user_emotion)
-
-            llm_result: Dict[str, object] = {}
-            if self._should_use_llm_memory_extraction(user_message):
-                from app.services.llm_service import glm_service
-
-                llm_result = await glm_service.extract_memory_facts(
-                    user_message=user_message,
-                    agent_message=agent_message,
-                    existing_memory=existing_memory,
-                    short_term_memory=existing_memory.get("short_term_memory"),
-                    recent_messages=recent_messages,
-                )
-
-            extracted = self._merge_extraction_results(rule_result, llm_result, user_emotion)
-
-            db = SessionLocal()
-            try:
-                user = self._get_user_by_wecom_id(db, wecom_user_id)
-                if not user:
-                    return
-
-                conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-                if not conversation:
-                    return
-
-                short_term = self._get_or_create_short_term_memory(db, user.id)
-                self._apply_long_term_updates(user, extracted)
-                self._upsert_memory_items(
-                    db=db,
-                    user=user,
-                    conversation_id=conversation_id,
-                    extracted=extracted,
-                )
-                self._update_short_term_memory(
-                    short_term=short_term,
-                    user_message=user_message,
-                    agent_message=agent_message,
-                    user_emotion=user_emotion,
-                    extracted=extracted,
-                )
-                conversation.memories_used = {
-                    **(conversation.memories_used or {}),
-                    "source": (conversation.memories_used or {}).get("source", "reply"),
-                    "memory_pipeline": "async",
+            await run_memory_update_graph(
+                {
+                    "wecom_user_id": wecom_user_id,
+                    "conversation_id": conversation_id,
+                    "user_message": user_message,
+                    "agent_message": agent_message,
+                    "user_emotion": user_emotion,
+                    "agent_emotion": agent_emotion,
                 }
-                db.commit()
-            finally:
-                db.close()
+            )
 
     def _on_background_task_done(self, task: asyncio.Task) -> None:
         self._background_tasks.discard(task)

@@ -115,26 +115,31 @@ class ProactiveChatService:
 
     async def preview_outreach(self, wecom_user_id: Optional[str] = None) -> Dict:
         target_wecom_user_id = self._resolve_target_user_id(wecom_user_id)
-        payload = await self._build_outreach_payload(
-            target_wecom_user_id=target_wecom_user_id,
-            trigger_type="manual",
+        from app.graph import run_proactive_chat_graph
+
+        payload = await run_proactive_chat_graph(
+            {
+                "target_wecom_user_id": target_wecom_user_id,
+                "trigger_type": "manual",
+                "window_key": None,
+                "send_delivery": False,
+            }
         )
-        payload["delivery"] = {"attempted": False, "status": "preview"}
-        return payload
+        return self._format_graph_payload(payload)
 
     async def run_outreach_once(self, wecom_user_id: Optional[str] = None) -> Dict:
         target_wecom_user_id = self._resolve_target_user_id(wecom_user_id)
-        payload = await self._build_outreach_payload(
-            target_wecom_user_id=target_wecom_user_id,
-            trigger_type="manual",
+        from app.graph import run_proactive_chat_graph
+
+        payload = await run_proactive_chat_graph(
+            {
+                "target_wecom_user_id": target_wecom_user_id,
+                "trigger_type": "manual",
+                "window_key": None,
+                "send_delivery": True,
+            }
         )
-        payload["delivery"] = await self._deliver_outreach(
-            target_wecom_user_id=target_wecom_user_id,
-            trigger_type="manual",
-            window_key=None,
-            content=payload["reply"],
-        )
-        return payload
+        return self._format_graph_payload(payload)
 
     async def dispatch_due_messages(self) -> Optional[Dict]:
         config = self.get_config()
@@ -142,19 +147,17 @@ class ProactiveChatService:
         if not due:
             return None
 
-        payload = await self._build_outreach_payload(
-            target_wecom_user_id=config["target_wecom_user_id"],
-            trigger_type=due["trigger_type"],
-            window_key=due.get("window_key"),
+        from app.graph import run_proactive_chat_graph
+
+        payload = await run_proactive_chat_graph(
+            {
+                "target_wecom_user_id": config["target_wecom_user_id"],
+                "trigger_type": due["trigger_type"],
+                "window_key": due.get("window_key"),
+                "send_delivery": True,
+            }
         )
-        delivery = await self._deliver_outreach(
-            target_wecom_user_id=config["target_wecom_user_id"],
-            trigger_type=due["trigger_type"],
-            window_key=due.get("window_key"),
-            content=payload["reply"],
-        )
-        payload["delivery"] = delivery
-        return payload
+        return self._format_graph_payload(payload)
 
     async def scheduler_loop(self) -> None:
         while True:
@@ -173,6 +176,20 @@ class ProactiveChatService:
         normalized = self._normalize_config(config)
         normalized["updated_at"] = updated_at
         return normalized
+
+    def _format_graph_payload(self, payload: Dict) -> Dict:
+        return {
+            "target_wecom_user_id": payload["target_wecom_user_id"],
+            "trigger_type": payload["trigger_type"],
+            "window_key": payload.get("window_key"),
+            "prompt": payload.get("prompt", ""),
+            "reply": payload.get("reply", ""),
+            "persona_config": payload.get("persona_config"),
+            "user_memory": payload.get("user_memory"),
+            "config": payload.get("proactive_config", self.get_config()),
+            "delivery": payload.get("delivery", {"attempted": False, "status": "preview"}),
+            "graph_trace": payload.get("graph_trace", []),
+        }
 
     def _normalize_config(self, config: Optional[Dict]) -> Dict:
         merged = dict(DEFAULT_PROACTIVE_CHAT_CONFIG)
@@ -304,6 +321,7 @@ class ProactiveChatService:
                 temperature=0.92,
                 top_p=0.95,
                 max_tokens=int(response_constraints["max_tokens"]),
+                task_type="proactive",
             )
         except Exception as exc:
             print(f"生成主动聊天文案失败，使用兜底: {exc}")
