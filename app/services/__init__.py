@@ -17,6 +17,10 @@ __all__ = [
     "proactive_chat_service",
     "RuntimeConfigService",
     "runtime_config_service",
+    "NapCatService",
+    "napcat_service",
+    "ChannelDispatcher",
+    "channel_dispatcher",
     "TunnelService",
     "tunnel_service",
 ]
@@ -35,6 +39,10 @@ _SERVICE_EXPORTS = {
     "proactive_chat_service": ("app.services.proactive_chat_service", "proactive_chat_service"),
     "RuntimeConfigService": ("app.services.runtime_config_service", "RuntimeConfigService"),
     "runtime_config_service": ("app.services.runtime_config_service", "runtime_config_service"),
+    "NapCatService": ("app.services.napcat_service", "NapCatService"),
+    "napcat_service": ("app.services.napcat_service", "napcat_service"),
+    "ChannelDispatcher": ("app.services.channel_dispatcher", "ChannelDispatcher"),
+    "channel_dispatcher": ("app.services.channel_dispatcher", "channel_dispatcher"),
     "TunnelService": ("app.services.tunnel_service", "TunnelService"),
     "tunnel_service": ("app.services.tunnel_service", "tunnel_service"),
 }

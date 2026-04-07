@@ -249,7 +249,8 @@ async def _proactive_generate_reply(state: ProactiveChatGraphState) -> Proactive
 async def _proactive_finalize_reply(state: ProactiveChatGraphState) -> ProactiveChatGraphState:
     return {
         "reply": state["reply"] or proactive_chat_service._build_fallback_message(
-            state["target_wecom_user_id"],
+            state["target_channel"],
+            state["target_external_user_id"],
             state["trigger_type"],
             state["user_memory"],
         ),

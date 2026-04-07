@@ -11,7 +11,8 @@ from app.services.memory_service import memory_service
 
 async def save_conversation(
     *,
-    user_id: str,
+    channel: str,
+    external_user_id: str,
     user_message: str,
     agent_message: str,
     user_emotion: Dict,
@@ -19,7 +20,8 @@ async def save_conversation(
     memories_used: Optional[Dict] = None,
 ) -> Optional[int]:
     return await memory_service.save_conversation(
-        user_id=user_id,
+        channel=channel,
+        external_user_id=external_user_id,
         user_message=user_message,
         agent_message=agent_message,
         user_emotion=user_emotion,
@@ -30,7 +32,8 @@ async def save_conversation(
 
 def schedule_memory_processing(
     *,
-    wecom_user_id: str,
+    channel: str,
+    external_user_id: str,
     conversation_id: Optional[int],
     user_message: str,
     agent_message: str,
@@ -38,7 +41,8 @@ def schedule_memory_processing(
     agent_emotion: Dict,
 ) -> None:
     memory_service.schedule_memory_processing(
-        wecom_user_id=wecom_user_id,
+        channel=channel,
+        external_user_id=external_user_id,
         conversation_id=conversation_id,
         user_message=user_message,
         agent_message=agent_message,

@@ -87,7 +87,8 @@ async def wecom_callback_handler(
 
     await run_incoming_message_graph(
         {
-            "user_id": message.get("from_user"),
+            "channel": "wecom",
+            "external_user_id": message.get("from_user"),
             "user_content": message.get("content", ""),
         }
     )

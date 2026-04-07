@@ -254,7 +254,11 @@ class GLMService:
         if not query:
             return {"enabled": config["zhipu_web_search_enabled"], "triggered": False, "query": "", "results": []}
 
-        results = await self.web_search(query)
+        try:
+            results = await self.web_search(query)
+        except Exception as exc:
+            print(f"web search unavailable, fallback to no-search context: {exc}")
+            results = []
         return {
             "enabled": config["zhipu_web_search_enabled"],
             "triggered": bool(results),

@@ -14,6 +14,7 @@ from starlette.staticfiles import StaticFiles
 from app.config import settings
 from app.models.database import init_db
 from app.routers import admin, setup, wecom
+from app.services.napcat_service import napcat_service
 from app.services.proactive_chat_service import proactive_chat_service
 from app.services.tunnel_service import (
     is_invalid_autodetected_tunnel_url,
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
     print(f"🚀 恋爱 Agent 启动中...")
     print(f"📍 服务地址: http://{settings.server_host}:{settings.server_port}")
     print(f"🔗 企业微信回调地址: {callback_url}")
+    await napcat_service.start()
     proactive_scheduler_task = asyncio.create_task(proactive_chat_service.scheduler_loop())
 
     yield
@@ -57,6 +59,7 @@ async def lifespan(app: FastAPI):
         await proactive_scheduler_task
     except asyncio.CancelledError:
         pass
+    await napcat_service.stop()
     print("👋 恋爱 Agent 关闭中...")
 
 

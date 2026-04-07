@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     wecom_secret: str = os.getenv("WECOM_SECRET", "")
     wecom_token: str = os.getenv("WECOM_TOKEN", "")
     wecom_encoding_aes_key: str = os.getenv("WECOM_ENCODING_AES_KEY", "")
+    napcat_ws_url: str = os.getenv("NAPCAT_WS_URL", "")
+    napcat_ws_token: str = os.getenv("NAPCAT_WS_TOKEN", "")
 
     # 智谱 API 配置
     zhipu_api_key: str = os.getenv("ZHIPU_API_KEY", "")
