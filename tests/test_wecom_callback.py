@@ -163,7 +163,7 @@ class WeComCallbackHandlerTests(unittest.TestCase):
             save_mock.await_args.kwargs["agent_message"],
             "听着就觉得你今天扛了很多，要不要慢慢和我说？",
         )
-        get_memory_mock.assert_awaited_once_with("user-1", query_text="今天有点累")
+        get_memory_mock.assert_awaited_once_with("wecom", "user-1", query_text="今天有点累")
         schedule_mock.assert_called_once()
         self.assertEqual(schedule_mock.call_args.kwargs["conversation_id"], 123)
 
@@ -271,7 +271,7 @@ class WeComCallbackHandlerTests(unittest.TestCase):
         system_prompt = chat_mock.await_args.kwargs["system_prompt"]
         self.assertIn("Web Search Context", system_prompt)
         self.assertIn("AlphaFold - DeepMind", system_prompt)
-        get_memory_mock.assert_awaited_once_with("user-1", query_text="AlphaFold 是什么")
+        get_memory_mock.assert_awaited_once_with("wecom", "user-1", query_text="AlphaFold 是什么")
         mocked_schedule.assert_called_once()
         self.assertEqual(mocked_schedule.call_args.kwargs["conversation_id"], 456)
 
