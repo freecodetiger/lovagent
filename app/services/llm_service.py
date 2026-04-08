@@ -42,13 +42,13 @@ class GLMService:
 
         return str(config.get("openai_model") or "").strip()
 
-    async def _request_completion(self, payload: Dict) -> Dict:
+    async def _request_completion(self, payload: Dict, api_key: Optional[str] = None) -> Dict:
         """请求对话补全接口并返回 JSON 结果。"""
         config = self._current_config()
         url = f"{config['zhipu_base_url']}/chat/completions"
 
         headers = {
-            "Authorization": f"Bearer {config['zhipu_api_key']}",
+            "Authorization": f"Bearer {api_key or config['zhipu_api_key']}",
             "Content-Type": "application/json",
         }
 
@@ -81,6 +81,15 @@ class GLMService:
         choice = choices[0]
         message = choice.get("message") or {}
         content = message.get("content") or ""
+        if isinstance(content, list):
+            fragments: List[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    fragments.append(text.strip())
+            content = "\n".join(fragments)
         reasoning_content = message.get("reasoning_content") or ""
         finish_reason = choice.get("finish_reason") or ""
         return content, reasoning_content, finish_reason
@@ -148,6 +157,56 @@ class GLMService:
             return content
 
         return ""
+
+    async def chat_multimodal(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        content_parts: List[Dict[str, object]],
+        context_messages: Optional[List[Dict[str, str]]] = None,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        max_tokens: int = 1500,
+    ) -> str:
+        """调用 GLM 多模态模型处理图片或 PDF。"""
+        config = self._current_config()
+        multimodal_api_key = str(config.get("multimodal_api_key") or "").strip()
+        multimodal_model = str(config.get("multimodal_model") or "").strip()
+        if not multimodal_api_key or not multimodal_model:
+            raise ValueError("Multimodal model is not configured")
+
+        messages: List[Dict[str, object]] = [{"role": "system", "content": system_prompt}]
+        if context_messages:
+            messages.extend(context_messages)
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_message},
+                    *content_parts,
+                ],
+            }
+        )
+
+        payload = {
+            "model": multimodal_model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+        }
+
+        result = await self._request_completion(payload, api_key=multimodal_api_key)
+        content, reasoning_content, finish_reason = self._extract_message(result)
+        if not content and reasoning_content and finish_reason == "length":
+            retry_payload = {**payload, "max_tokens": max(max_tokens * 2, 1024)}
+            retry_result = await self._request_completion(retry_payload, api_key=multimodal_api_key)
+            retry_content, _, _ = self._extract_message(retry_result)
+            if retry_content:
+                return retry_content
+
+        return content or ""
 
     async def chat_with_context(
         self,

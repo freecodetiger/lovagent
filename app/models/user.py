@@ -81,6 +81,47 @@ class Conversation(Base):
         return f"<Conversation(id={self.id}, user_id={self.user_id})>"
 
 
+class InboundAggregateBatch(Base):
+    """入站消息聚合批次。"""
+
+    __tablename__ = "inbound_aggregate_batches"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    wecom_user_id = Column(String(64), nullable=False, comment="企业微信用户 ID")
+    status = Column(String(32), nullable=False, default="collecting", comment="批次状态")
+    window_started_at = Column(DateTime, default=datetime.now, comment="聚合窗口开始时间")
+    window_expires_at = Column(DateTime, nullable=False, comment="聚合窗口结束时间")
+    last_event_at = Column(DateTime, nullable=False, comment="最后一条消息时间")
+    reply_sent_at = Column(DateTime, comment="回复发送时间")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+    def __repr__(self):
+        return f"<InboundAggregateBatch(id={self.id}, user={self.wecom_user_id}, status={self.status})>"
+
+
+class InboundMessageEvent(Base):
+    """入站消息事件，用于幂等与聚合。"""
+
+    __tablename__ = "inbound_message_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    msg_id = Column(String(128), unique=True, nullable=False, comment="企业微信消息唯一 ID")
+    batch_id = Column(Integer, ForeignKey("inbound_aggregate_batches.id", name="fk_inbound_event_batch"), comment="聚合批次 ID")
+    wecom_user_id = Column(String(64), nullable=False, comment="企业微信用户 ID")
+    msg_type = Column(String(32), nullable=False, comment="消息类型")
+    content_text = Column(Text, comment="归一化后的文本内容")
+    media_id = Column(String(128), comment="媒体 ID")
+    file_name = Column(String(255), comment="文件名")
+    image_url = Column(Text, comment="图片 URL")
+    processed = Column(Boolean, default=False, comment="是否已完成聚合处理")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+    def __repr__(self):
+        return f"<InboundMessageEvent(id={self.id}, msg_id={self.msg_id}, type={self.msg_type})>"
+
+
 class EmotionState(Base):
     """情绪状态模型"""
 

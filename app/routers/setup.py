@@ -68,6 +68,8 @@ async def save_setup_model(payload: SetupModelPayload, request: Request):
             "zhipu_api_key": payload.zhipu_api_key.strip(),
             "zhipu_model": payload.zhipu_model.strip(),
             "zhipu_thinking_type": payload.zhipu_thinking_type.strip(),
+            "multimodal_api_key": payload.multimodal_api_key.strip(),
+            "multimodal_model": payload.multimodal_model.strip(),
             "openai_api_key": payload.openai_api_key.strip(),
             "openai_base_url": payload.openai_base_url.strip().rstrip("/"),
             "openai_model_mode": payload.openai_model_mode.strip(),

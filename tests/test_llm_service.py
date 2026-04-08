@@ -34,6 +34,8 @@ except ModuleNotFoundError:
         zhipu_api_key="test-key",
         zhipu_model="glm-5",
         zhipu_thinking_type="disabled",
+        zhipu_multimodal_api_key="test-mm-key",
+        zhipu_multimodal_model="glm-4.6v",
         zhipu_base_url="https://example.com",
         zhipu_web_search_enabled=True,
         zhipu_web_search_engine="search_std",
@@ -244,6 +246,83 @@ class GLMServiceTests(unittest.TestCase):
 
         self.assertEqual(result, "memory-ok")
         self.assertEqual(provider.generate.await_args.kwargs["model"], "memory-model")
+
+    def test_chat_multimodal_builds_glm_payload_for_image(self):
+        service = GLMService()
+        mocked_request = AsyncMock(
+            return_value={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": "我看完图片了", "role": "assistant"},
+                    }
+                ]
+            }
+        )
+
+        with (
+            patch.object(
+                service,
+                "_current_config",
+                return_value={
+                    "multimodal_api_key": "mm-key",
+                    "multimodal_model": "glm-4.6v",
+                },
+            ),
+            patch.object(service, "_request_completion", mocked_request),
+        ):
+            result = asyncio.run(
+                service.chat_multimodal(
+                    system_prompt="system",
+                    user_message="[图片] 用户发送了一张图片",
+                    content_parts=[{"type": "image_url", "image_url": {"url": "base64-image"}}],
+                    context_messages=[{"role": "assistant", "content": "之前聊过"}],
+                )
+            )
+
+        self.assertEqual(result, "我看完图片了")
+        payload = mocked_request.await_args.args[0]
+        self.assertEqual(mocked_request.await_args.kwargs["api_key"], "mm-key")
+        self.assertEqual(payload["model"], "glm-4.6v")
+        self.assertEqual(payload["messages"][1], {"role": "assistant", "content": "之前聊过"})
+        self.assertEqual(payload["messages"][2]["content"][1]["type"], "image_url")
+
+    def test_chat_multimodal_builds_glm_payload_for_pdf(self):
+        service = GLMService()
+        mocked_request = AsyncMock(
+            return_value={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": "我看完 PDF 了", "role": "assistant"},
+                    }
+                ]
+            }
+        )
+
+        with (
+            patch.object(
+                service,
+                "_current_config",
+                return_value={
+                    "multimodal_api_key": "mm-key",
+                    "multimodal_model": "glm-4.6v",
+                },
+            ),
+            patch.object(service, "_request_completion", mocked_request),
+        ):
+            result = asyncio.run(
+                service.chat_multimodal(
+                    system_prompt="system",
+                    user_message="[PDF] 用户发送了文件《test.pdf》",
+                    content_parts=[{"type": "file_url", "file_url": {"url": "https://example.com/test.pdf"}}],
+                )
+            )
+
+        self.assertEqual(result, "我看完 PDF 了")
+        payload = mocked_request.await_args.args[0]
+        self.assertEqual(payload["messages"][1]["content"][1]["type"], "file_url")
+        self.assertEqual(payload["messages"][1]["content"][1]["file_url"]["url"], "https://example.com/test.pdf")
 
 
 if __name__ == "__main__":

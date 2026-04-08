@@ -6,10 +6,11 @@ from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.responses import PlainTextResponse
 from wechatpy.exceptions import InvalidSignatureException
 
-from app.graph import run_incoming_message_graph
 from app.services.llm_service import glm_service  # 兼容测试 patch
 from app.services.emotion_engine import emotion_engine  # 兼容测试 patch
+from app.services.incoming_aggregation_service import incoming_aggregation_service
 from app.services.memory_service import memory_service  # 兼容测试 patch
+from app.services.multimodal_chat_service import multimodal_chat_service
 from app.services.persona_service import persona_service  # 兼容测试 patch
 from app.services.wecom_service import wecom_service
 
@@ -81,16 +82,10 @@ async def wecom_callback_handler(
     message = wecom_service.parse_message(decrypted_xml)
     print(f"收到消息: {message}")
 
-    # 只处理文本消息
-    if message.get("msg_type") != "text":
-        return PlainTextResponse(content="success")
+    registration = await incoming_aggregation_service.register_event(message)
+    if not registration.get("duplicate"):
+        incoming_aggregation_service.schedule_user_processing(str(message.get("from_user") or ""))
 
-    await run_incoming_message_graph(
-        {
-            "user_id": message.get("from_user"),
-            "user_content": message.get("content", ""),
-        }
-    )
     return PlainTextResponse(content="success")
 
 

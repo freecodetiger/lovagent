@@ -17,6 +17,8 @@ type SetupFormState = {
   model_provider: SetupModelProvider;
   zhipu_api_key: string;
   zhipu_model: string;
+  multimodal_api_key: string;
+  multimodal_model: string;
   openai_api_key: string;
   openai_base_url: string;
   openai_model_mode: SetupModelMode;
@@ -37,6 +39,8 @@ const DEFAULT_FORM_STATE: SetupFormState = {
   model_provider: "glm",
   zhipu_api_key: "",
   zhipu_model: "glm-5",
+  multimodal_api_key: "",
+  multimodal_model: "glm-4.6v",
   openai_api_key: "",
   openai_base_url: "",
   openai_model_mode: "manual",
@@ -58,6 +62,7 @@ function buildFormState(status: SetupStatus): SetupFormState {
     ...DEFAULT_FORM_STATE,
     model_provider: status.current.model_provider || "glm",
     zhipu_model: status.current.zhipu_model || "glm-5",
+    multimodal_model: status.current.multimodal_model || status.raw.model.multimodal_model || "glm-4.6v",
     openai_base_url: status.current.openai_base_url || status.raw.model.openai_base_url || "",
     openai_model_mode: status.current.openai_model_mode || status.raw.model.openai_model_mode || "manual",
     openai_model: status.current.openai_model || status.raw.model.openai_model || "",
@@ -71,24 +76,29 @@ function buildFormState(status: SetupStatus): SetupFormState {
 }
 
 function buildModelSummary(status: SetupStatus): string {
+  const multimodalSummary = status.current.multimodal_configured
+    ? ` / 多模态: ${status.current.multimodal_model || "glm-4.6v"}`
+    : " / 多模态未启用";
   if (status.current.model_provider === "openai_compatible") {
     if (status.current.openai_model_mode === "auto") {
-      return `OpenAI-compatible / auto`;
+      return `OpenAI-compatible / auto${multimodalSummary}`;
     }
-    return `OpenAI-compatible / ${status.current.openai_model || "未设置模型"}`;
+    return `OpenAI-compatible / ${status.current.openai_model || "未设置模型"}${multimodalSummary}`;
   }
-  return `GLM / ${status.current.zhipu_model || "glm-5"}`;
+  return `GLM / ${status.current.zhipu_model || "glm-5"}${multimodalSummary}`;
 }
 
 function buildModelDraftSummary(form: SetupFormState): string[] {
+  const multimodalLine = `多模态识别：${form.multimodal_model || "未填写"}（图片 / PDF）`;
   if (form.model_provider === "glm") {
-    return [`当前将使用 GLM`, `主模型：${form.zhipu_model || "未填写"}`, "保存后即时生效，无需重启后端"];
+    return [`当前将使用 GLM`, `主模型：${form.zhipu_model || "未填写"}`, multimodalLine, "保存后即时生效，无需重启后端"];
   }
 
   if (form.openai_model_mode === "auto") {
     return [
       "当前将使用 OpenAI-compatible / Auto 路由",
       `聊天：${form.chat_model || "未填写"} / 记忆：${form.memory_model || "未填写"} / 主动消息：${form.proactive_model || "未填写"}`,
+      multimodalLine,
       "保存后即时生效，无需重启后端",
     ];
   }
@@ -96,6 +106,7 @@ function buildModelDraftSummary(form: SetupFormState): string[] {
   return [
     "当前将使用 OpenAI-compatible / 手动模式",
     `统一模型：${form.openai_model || "未填写"}`,
+    multimodalLine,
     "保存后即时生效，无需重启后端",
   ];
 }
@@ -113,6 +124,7 @@ export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEn
       ...current,
       model_provider: initialStatus.current.model_provider || current.model_provider || "glm",
       zhipu_model: initialStatus.current.zhipu_model || current.zhipu_model || "glm-5",
+      multimodal_model: initialStatus.current.multimodal_model || current.multimodal_model || "glm-4.6v",
       openai_base_url: current.openai_base_url || initialStatus.current.openai_base_url || initialStatus.raw.model.openai_base_url || "",
       openai_model_mode: initialStatus.current.openai_model_mode || current.openai_model_mode || "manual",
       openai_model: current.openai_model || initialStatus.current.openai_model || initialStatus.raw.model.openai_model || "",
@@ -194,6 +206,8 @@ export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEn
         zhipu_api_key: form.zhipu_api_key,
         zhipu_model: form.zhipu_model,
         zhipu_thinking_type: "disabled",
+        multimodal_api_key: form.multimodal_api_key,
+        multimodal_model: form.multimodal_model,
         openai_api_key: form.openai_api_key,
         openai_base_url: form.openai_base_url,
         openai_model_mode: form.openai_model_mode,
@@ -491,6 +505,31 @@ export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEn
                   </div>
                 </>
               )}
+              <label className="field field-span">
+                <span>多模态 GLM API Key</span>
+                <input
+                  type="password"
+                  value={form.multimodal_api_key}
+                  onChange={(event) => updateField("multimodal_api_key", event.target.value)}
+                  placeholder={
+                    initialStatus.current.has_multimodal_api_key
+                      ? "已配置，可重新覆盖；留空可继续复用"
+                      : "留空时优先复用上面的 GLM API Key"
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>图片 / PDF 模型</span>
+                <input
+                  value={form.multimodal_model}
+                  onChange={(event) => updateField("multimodal_model", event.target.value)}
+                  placeholder="glm-4.6v"
+                />
+              </label>
+              <div className="setup-hint-card">
+                <strong>多模态说明</strong>
+                <span>仅使用具有多模态功能的大模型可识别图像和 PDF。当前图片 / PDF 固定通过 GLM 多模态链路处理。</span>
+              </div>
             </div>
             <div className="setup-model-summary">
               {buildModelDraftSummary(form).map((line) => (

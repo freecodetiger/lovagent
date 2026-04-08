@@ -133,6 +133,8 @@ export const api = {
     zhipu_api_key: string;
     zhipu_model: string;
     zhipu_thinking_type?: string;
+    multimodal_api_key: string;
+    multimodal_model: string;
     openai_api_key: string;
     openai_base_url: string;
     openai_model_mode: SetupModelMode;

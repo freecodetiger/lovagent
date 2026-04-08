@@ -54,6 +54,8 @@ class RuntimeConfigServiceTests(unittest.TestCase):
             patch.object(settings, "model_provider", "glm"),
             patch.object(settings, "zhipu_api_key", "env-key"),
             patch.object(settings, "zhipu_model", "glm-env"),
+            patch.object(settings, "zhipu_multimodal_api_key", ""),
+            patch.object(settings, "zhipu_multimodal_model", "glm-4.6v"),
             patch.object(settings, "openai_api_key", "env-openai-key"),
             patch.object(settings, "openai_base_url", "https://env-openai.example.com/v1"),
             patch.object(settings, "openai_model", "env-openai-model"),
@@ -73,6 +75,8 @@ class RuntimeConfigServiceTests(unittest.TestCase):
 
             self.assertEqual(effective_model["zhipu_api_key"], "env-key")
             self.assertEqual(effective_model["zhipu_model"], "glm-5")
+            self.assertEqual(effective_model["multimodal_api_key"], "env-key")
+            self.assertEqual(effective_model["multimodal_model"], "glm-4.6v")
             self.assertEqual(effective_model["openai_model"], "env-openai-model")
             self.assertEqual(effective_wecom["corp_id"], "runtime-corp")
             self.assertEqual(effective_wecom["agent_id"], "runtime-agent")
@@ -119,6 +123,8 @@ class RuntimeConfigServiceTests(unittest.TestCase):
             patch.object(settings, "openai_api_key", ""),
             patch.object(settings, "openai_base_url", "https://api.openai.com/v1"),
             patch.object(settings, "openai_model", "fallback-model"),
+            patch.object(settings, "zhipu_multimodal_api_key", ""),
+            patch.object(settings, "zhipu_multimodal_model", "glm-4.6v"),
         ):
             runtime_config_service.save_section(
                 "model",
@@ -126,6 +132,8 @@ class RuntimeConfigServiceTests(unittest.TestCase):
                     "model_provider": "openai_compatible",
                     "openai_api_key": "openai-key",
                     "openai_base_url": "https://openrouter.example.com/v1",
+                    "multimodal_api_key": "mm-key",
+                    "multimodal_model": "glm-4.6v",
                     "openai_model_mode": "auto",
                     "openai_models": {
                         "chat_model": "chat-x",
@@ -141,12 +149,18 @@ class RuntimeConfigServiceTests(unittest.TestCase):
             self.assertEqual(effective_model["openai_models"]["chat_model"], "chat-x")
             self.assertEqual(effective_model["openai_models"]["memory_model"], "memory-x")
             self.assertEqual(effective_model["openai_models"]["proactive_model"], "proactive-x")
+            self.assertEqual(effective_model["multimodal_api_key"], "mm-key")
+            self.assertEqual(effective_model["multimodal_model"], "glm-4.6v")
             self.assertTrue(runtime_config_service.is_model_configured())
+            self.assertTrue(runtime_config_service.is_multimodal_configured())
 
             payload = runtime_config_service.get_status_payload()
             self.assertEqual(payload["current"]["model_provider"], "openai_compatible")
             self.assertEqual(payload["current"]["openai_model_mode"], "auto")
             self.assertEqual(payload["current"]["openai_models"]["chat_model"], "chat-x")
+            self.assertEqual(payload["current"]["multimodal_model"], "glm-4.6v")
+            self.assertTrue(payload["current"]["has_multimodal_api_key"])
+            self.assertTrue(payload["current"]["multimodal_configured"])
             self.assertTrue(payload["current"]["has_openai_api_key"])
 
 

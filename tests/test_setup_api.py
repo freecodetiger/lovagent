@@ -30,6 +30,8 @@ class SetupApiTests(unittest.TestCase):
         self.settings_patches = contextlib.ExitStack()
         self.settings_patches.enter_context(patch.object(settings, "model_provider", "glm"))
         self.settings_patches.enter_context(patch.object(settings, "zhipu_api_key", ""))
+        self.settings_patches.enter_context(patch.object(settings, "zhipu_multimodal_api_key", ""))
+        self.settings_patches.enter_context(patch.object(settings, "zhipu_multimodal_model", "glm-4.6v"))
         self.settings_patches.enter_context(patch.object(settings, "openai_api_key", ""))
         self.settings_patches.enter_context(patch.object(settings, "openai_base_url", "https://api.openai.com/v1"))
         self.settings_patches.enter_context(patch.object(settings, "openai_model", "gpt-4o-mini"))
@@ -140,6 +142,8 @@ class SetupApiTests(unittest.TestCase):
                     "model_provider": "openai_compatible",
                     "openai_api_key": "openai-key",
                     "openai_base_url": "https://openrouter.example.com/v1",
+                    "multimodal_api_key": "mm-key",
+                    "multimodal_model": "glm-4.6v",
                     "openai_model_mode": "auto",
                     "openai_model": "",
                     "openai_models": {
@@ -157,6 +161,9 @@ class SetupApiTests(unittest.TestCase):
         self.assertEqual(payload["current"]["openai_model_mode"], "auto")
         self.assertEqual(payload["current"]["openai_base_url"], "https://openrouter.example.com/v1")
         self.assertEqual(payload["current"]["openai_models"]["memory_model"], "memory-x")
+        self.assertEqual(payload["current"]["multimodal_model"], "glm-4.6v")
+        self.assertTrue(payload["current"]["multimodal_configured"])
+        self.assertTrue(payload["current"]["has_multimodal_api_key"])
         self.assertTrue(payload["current"]["has_openai_api_key"])
 
     def test_setup_model_endpoint_rejects_incomplete_openai_manual_config(self):

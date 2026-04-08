@@ -2,7 +2,9 @@
 企业微信消息服务
 """
 
+import asyncio
 import xml.etree.ElementTree as ET
+from typing import Tuple
 from wechatpy.enterprise import WeChatClient
 from wechatpy.enterprise.crypto import WeChatCrypto
 
@@ -64,6 +66,10 @@ class WeComService:
             message["location_x"] = root.find("Location_X").text
             message["location_y"] = root.find("Location_Y").text
             message["label"] = root.find("Label").text if root.find("Label") is not None else None
+        elif msg_type == "file":
+            message["media_id"] = root.find("MediaId").text if root.find("MediaId") is not None else None
+            message["file_name"] = root.find("FileName").text if root.find("FileName") is not None else None
+            message["title"] = root.find("Title").text if root.find("Title") is not None else None
 
         return message
 
@@ -104,6 +110,16 @@ class WeComService:
     def get_access_token(self) -> str:
         """获取 access_token"""
         return self._build_client().access_token
+
+    async def download_media(self, media_id: str) -> Tuple[bytes, str]:
+        """下载企业微信临时素材。"""
+        if not media_id:
+            raise ValueError("Missing media_id")
+
+        client = self._build_client()
+        response = await asyncio.to_thread(client.media.download, media_id)
+        response.raise_for_status()
+        return response.content, str(response.headers.get("Content-Type") or "")
 
 
 # 全局服务实例

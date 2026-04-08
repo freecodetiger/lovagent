@@ -21,6 +21,8 @@ DEFAULT_RUNTIME_CONFIG = {
         "zhipu_api_key": "",
         "zhipu_model": "glm-5",
         "zhipu_thinking_type": "disabled",
+        "multimodal_api_key": "",
+        "multimodal_model": "glm-4.6v",
         "openai_api_key": "",
         "openai_base_url": "",
         "openai_model_mode": "manual",
@@ -59,6 +61,10 @@ class RuntimeConfigService:
         defaults["zhipu_model"] = str(source.get("zhipu_model", defaults["zhipu_model"]) or defaults["zhipu_model"])
         defaults["zhipu_thinking_type"] = str(
             source.get("zhipu_thinking_type", defaults["zhipu_thinking_type"]) or defaults["zhipu_thinking_type"]
+        )
+        defaults["multimodal_api_key"] = str(source.get("multimodal_api_key", defaults["multimodal_api_key"]) or "")
+        defaults["multimodal_model"] = str(
+            source.get("multimodal_model", defaults["multimodal_model"]) or defaults["multimodal_model"]
         )
         defaults["openai_api_key"] = str(source.get("openai_api_key", defaults["openai_api_key"]) or "")
         defaults["openai_base_url"] = str(source.get("openai_base_url", defaults["openai_base_url"]) or "")
@@ -141,11 +147,20 @@ class RuntimeConfigService:
             "memory_model": str((config.get("openai_models") or {}).get("memory_model") or openai_model),
             "proactive_model": str((config.get("openai_models") or {}).get("proactive_model") or openai_model),
         }
+        multimodal_api_key = (
+            config["multimodal_api_key"]
+            or config["zhipu_api_key"]
+            or settings.zhipu_multimodal_api_key
+            or settings.zhipu_api_key
+        )
+        multimodal_model = config["multimodal_model"] or settings.zhipu_multimodal_model or "glm-4.6v"
         return {
             "model_provider": config["model_provider"] or settings.model_provider,
             "zhipu_api_key": config["zhipu_api_key"] or settings.zhipu_api_key,
             "zhipu_model": config["zhipu_model"] or settings.zhipu_model,
             "zhipu_thinking_type": config["zhipu_thinking_type"] or settings.zhipu_thinking_type,
+            "multimodal_api_key": multimodal_api_key,
+            "multimodal_model": multimodal_model,
             "zhipu_base_url": settings.zhipu_base_url,
             "zhipu_web_search_enabled": settings.zhipu_web_search_enabled,
             "zhipu_web_search_engine": settings.zhipu_web_search_engine,
@@ -178,6 +193,10 @@ class RuntimeConfigService:
             return bool(str(model.get("openai_model") or "").strip())
 
         return False
+
+    def is_multimodal_configured(self) -> bool:
+        model = self.get_effective_model_config()
+        return bool(str(model.get("multimodal_api_key") or "").strip() and str(model.get("multimodal_model") or "").strip())
 
     def get_effective_wecom_config(self) -> Dict:
         config = self.get_config()["wecom"]
@@ -246,6 +265,7 @@ class RuntimeConfigService:
             "current": {
                 "model_provider": effective_model["model_provider"],
                 "zhipu_model": effective_model["zhipu_model"],
+                "multimodal_model": effective_model["multimodal_model"],
                 "openai_model_mode": effective_model["openai_model_mode"],
                 "openai_base_url": effective_model["openai_base_url"],
                 "openai_model": effective_model["openai_model"],
@@ -255,6 +275,8 @@ class RuntimeConfigService:
                 "wecom_corp_id": effective_wecom["corp_id"],
                 "wecom_agent_id": effective_wecom["agent_id"],
                 "has_zhipu_api_key": bool(effective_model["zhipu_api_key"]),
+                "has_multimodal_api_key": bool(effective_model["multimodal_api_key"]),
+                "multimodal_configured": self.is_multimodal_configured(),
                 "has_openai_api_key": bool(effective_model["openai_api_key"]),
                 "has_wecom_secret": bool(effective_wecom["secret"]),
                 "has_wecom_token": bool(effective_wecom["token"]),
@@ -265,11 +287,13 @@ class RuntimeConfigService:
                 "model": {
                     "model_provider": raw["model"]["model_provider"],
                     "zhipu_model": raw["model"]["zhipu_model"],
+                    "multimodal_model": raw["model"]["multimodal_model"],
                     "openai_model_mode": raw["model"]["openai_model_mode"],
                     "openai_base_url": raw["model"]["openai_base_url"],
                     "openai_model": raw["model"]["openai_model"],
                     "openai_models": deepcopy(raw["model"]["openai_models"]),
                     "has_zhipu_api_key": bool(raw["model"]["zhipu_api_key"]),
+                    "has_multimodal_api_key": bool(raw["model"]["multimodal_api_key"]),
                     "has_openai_api_key": bool(raw["model"]["openai_api_key"]),
                 },
                 "wecom": {

@@ -87,6 +87,8 @@ class SetupModelPayload(BaseModel):
     zhipu_api_key: str = ""
     zhipu_model: str = "glm-5"
     zhipu_thinking_type: str = "disabled"
+    multimodal_api_key: str = ""
+    multimodal_model: str = "glm-4.6v"
     openai_api_key: str = ""
     openai_base_url: str = ""
     openai_model_mode: str = "manual"

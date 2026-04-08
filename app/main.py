@@ -14,6 +14,7 @@ from starlette.staticfiles import StaticFiles
 from app.config import settings
 from app.models.database import init_db
 from app.routers import admin, setup, wecom
+from app.services.public_media_service import PUBLIC_MEDIA_DIR, PUBLIC_MEDIA_ROUTE
 from app.services.proactive_chat_service import proactive_chat_service
 from app.services.tunnel_service import (
     is_invalid_autodetected_tunnel_url,
@@ -91,6 +92,9 @@ app.include_router(setup.router)
 
 if ADMIN_DIST_DIR.exists():
     app.mount("/admin-static", StaticFiles(directory=ADMIN_DIST_DIR), name="admin_static")
+
+PUBLIC_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount(PUBLIC_MEDIA_ROUTE, StaticFiles(directory=PUBLIC_MEDIA_DIR), name="public_media")
 
 
 @app.get("/")

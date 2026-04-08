@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     zhipu_api_key: str = os.getenv("ZHIPU_API_KEY", "")
     zhipu_model: str = os.getenv("ZHIPU_MODEL", "glm-5")
     zhipu_thinking_type: str = os.getenv("ZHIPU_THINKING_TYPE", "disabled")
+    zhipu_multimodal_api_key: str = os.getenv("ZHIPU_MULTIMODAL_API_KEY", "")
+    zhipu_multimodal_model: str = os.getenv("ZHIPU_MULTIMODAL_MODEL", "glm-4.6v")
     zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     zhipu_web_search_enabled: bool = os.getenv("ZHIPU_WEB_SEARCH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     zhipu_web_search_engine: str = os.getenv("ZHIPU_WEB_SEARCH_ENGINE", "search_std")

@@ -128,6 +128,7 @@ export type SetupStatus = {
   current: {
     model_provider: SetupModelProvider;
     zhipu_model: string;
+    multimodal_model: string;
     openai_model_mode: SetupModelMode;
     openai_base_url: string;
     openai_model: string;
@@ -137,6 +138,8 @@ export type SetupStatus = {
     wecom_corp_id: string;
     wecom_agent_id: string;
     has_zhipu_api_key: boolean;
+    has_multimodal_api_key: boolean;
+    multimodal_configured: boolean;
     has_openai_api_key: boolean;
     has_wecom_secret: boolean;
     has_wecom_token: boolean;
@@ -147,11 +150,13 @@ export type SetupStatus = {
     model: {
       model_provider: SetupModelProvider;
       zhipu_model: string;
+      multimodal_model: string;
       openai_model_mode: SetupModelMode;
       openai_base_url: string;
       openai_model: string;
       openai_models: SetupModelRouting;
       has_zhipu_api_key: boolean;
+      has_multimodal_api_key: boolean;
       has_openai_api_key: boolean;
     };
     wecom: {
