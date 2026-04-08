@@ -5,6 +5,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String, Text
+from sqlalchemy.ext.hybrid import hybrid_property
 
 from app.models.user import Base
 
@@ -40,7 +41,8 @@ class ProactiveChatConfig(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     config_key = Column(String(64), unique=True, nullable=False, comment="配置键")
     enabled = Column(Boolean, nullable=False, default=False, comment="是否启用主动聊天")
-    target_wecom_user_id = Column(String(64), comment="目标企业微信用户 ID")
+    target_channel = Column(String(32), nullable=False, default="wecom", comment="目标渠道")
+    target_external_user_id = Column(String(128), comment="目标渠道用户 ID")
     scheduled_windows = Column(JSON, nullable=False, default=list, comment="固定时段窗口")
     inactivity_trigger_hours = Column(Integer, nullable=False, default=6, comment="多久未互动后主动发起")
     quiet_hours = Column(JSON, nullable=False, default=dict, comment="免打扰时段")
@@ -54,6 +56,19 @@ class ProactiveChatConfig(Base):
     def __repr__(self):
         return f"<ProactiveChatConfig(id={self.id}, config_key={self.config_key})>"
 
+    @hybrid_property
+    def target_wecom_user_id(self):
+        return self.target_external_user_id if self.target_channel == "wecom" else None
+
+    @target_wecom_user_id.setter
+    def target_wecom_user_id(self, value):
+        self.target_channel = "wecom"
+        self.target_external_user_id = value
+
+    @target_wecom_user_id.expression
+    def target_wecom_user_id(cls):  # type: ignore[no-redef]
+        return cls.target_external_user_id
+
 
 class ProactiveChatLog(Base):
     """主动聊天发送日志。"""
@@ -61,7 +76,8 @@ class ProactiveChatLog(Base):
     __tablename__ = "proactive_chat_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    target_wecom_user_id = Column(String(64), nullable=False, comment="目标企业微信用户 ID")
+    target_channel = Column(String(32), nullable=False, default="wecom", comment="目标渠道")
+    target_external_user_id = Column(String(128), nullable=False, comment="目标渠道用户 ID")
     trigger_type = Column(String(32), nullable=False, comment="触发类型")
     window_key = Column(String(32), comment="固定窗口 key")
     content = Column(Text, comment="发送内容")
@@ -72,7 +88,23 @@ class ProactiveChatLog(Base):
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
 
     def __repr__(self):
-        return f"<ProactiveChatLog(id={self.id}, target={self.target_wecom_user_id}, trigger={self.trigger_type})>"
+        return (
+            f"<ProactiveChatLog(id={self.id}, target={self.target_channel}:{self.target_external_user_id}, "
+            f"trigger={self.trigger_type})>"
+        )
+
+    @hybrid_property
+    def target_wecom_user_id(self):
+        return self.target_external_user_id if self.target_channel == "wecom" else None
+
+    @target_wecom_user_id.setter
+    def target_wecom_user_id(self, value):
+        self.target_channel = "wecom"
+        self.target_external_user_id = value
+
+    @target_wecom_user_id.expression
+    def target_wecom_user_id(cls):  # type: ignore[no-redef]
+        return cls.target_external_user_id
 
 
 class RuntimeConfig(Base):

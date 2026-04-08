@@ -1,4 +1,4 @@
-import { FormEvent, startTransition, useDeferredValue, useEffect, useState } from "react";
+﻿import { FormEvent, startTransition, useDeferredValue, useEffect, useState } from "react";
 
 import { api } from "./api";
 import { LoginShell } from "./components/LoginShell";
@@ -46,6 +46,7 @@ function App() {
   const deferredUserQuery = useDeferredValue(userQuery);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState<string>("wecom");
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [memoryDraft, setMemoryDraft] = useState<UserMemory>(EMPTY_MEMORY);
   const [memoryLoading, setMemoryLoading] = useState(false);
@@ -99,7 +100,8 @@ function App() {
         setProactiveConfig(proactive);
         setUsers(userPayload.items);
         if (userPayload.items[0] && !selectedUserId) {
-          setSelectedUserId(userPayload.items[0].wecom_user_id);
+          setSelectedChannel(userPayload.items[0].channel);
+          setSelectedUserId(userPayload.items[0].external_user_id);
         }
       })
       .catch((error: Error) => {
@@ -123,9 +125,10 @@ function App() {
           return;
         }
 
-        const stillExists = payload.items.some((item) => item.wecom_user_id === selectedUserId);
+        const stillExists = payload.items.some((item) => item.channel === selectedChannel && item.external_user_id === selectedUserId);
         if (!stillExists) {
-          setSelectedUserId(payload.items[0].wecom_user_id);
+          setSelectedChannel(payload.items[0].channel);
+          setSelectedUserId(payload.items[0].external_user_id);
         }
       })
       .catch((error: Error) => {
@@ -134,7 +137,7 @@ function App() {
       .finally(() => {
         setUsersLoading(false);
       });
-  }, [authenticated, deferredUserQuery, selectedUserId, setupStatus?.setup_completed]);
+  }, [authenticated, deferredUserQuery, selectedChannel, selectedUserId, setupStatus?.setup_completed]);
 
   useEffect(() => {
     if (!authenticated || !setupStatus?.setup_completed || !selectedUserId) {
@@ -143,7 +146,7 @@ function App() {
 
     setMemoryLoading(true);
     void api
-      .getUserMemory(selectedUserId)
+      .getUserMemory(selectedChannel, selectedUserId)
       .then((payload) => {
         setMemoryDraft(normalizeUserMemory(payload));
       })
@@ -153,7 +156,7 @@ function App() {
       .finally(() => {
         setMemoryLoading(false);
       });
-  }, [authenticated, selectedUserId, setupStatus?.setup_completed]);
+  }, [authenticated, selectedChannel, selectedUserId, setupStatus?.setup_completed]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -204,7 +207,8 @@ function App() {
     try {
       const payload = {
         user_message: previewMessage,
-        wecom_user_id: selectedUserId || undefined,
+        channel: selectedChannel || undefined,
+        external_user_id: selectedUserId || undefined,
         draft_config: personaConfig,
       };
       const response = mode === "prompt" ? await api.previewPrompt(payload) : await api.previewReply(payload);
@@ -228,7 +232,7 @@ function App() {
 
     setMemorySaving(true);
     try {
-      const saved = await api.saveUserMemory(selectedUserId, memoryDraft);
+      const saved = await api.saveUserMemory(selectedChannel, selectedUserId, memoryDraft);
       setMemoryDraft(normalizeUserMemory(saved));
       setStatusMessage("用户记忆已保存。");
     } catch (error) {
@@ -259,8 +263,8 @@ function App() {
 
       const response =
         mode === "preview"
-          ? await api.previewProactiveChat(saved.target_wecom_user_id)
-          : await api.runProactiveChatOnce(saved.target_wecom_user_id);
+          ? await api.previewProactiveChat(saved.target_channel, saved.target_external_user_id)
+          : await api.runProactiveChatOnce(saved.target_channel, saved.target_external_user_id);
 
       setProactivePrompt(response.prompt);
       setProactiveReply(response.reply);
@@ -366,7 +370,7 @@ function App() {
   }
 
   function updateProactiveField(
-    field: "enabled" | "target_wecom_user_id" | "tone_hint",
+    field: "enabled" | "target_channel" | "target_external_user_id" | "tone_hint",
     value: boolean | string,
   ) {
     setProactiveConfig((current) =>
@@ -424,7 +428,7 @@ function App() {
   function handleEnterAdmin() {
     window.history.replaceState({}, "", ADMIN_PATH);
     if (!authenticated) {
-      setStatusMessage("请先登录管理员后台后再继续编辑配置。");
+      setStatusMessage("请先登录管理员后台。");
       return;
     }
     setStatusMessage("环境校验完成，已进入管理后台。");
@@ -444,45 +448,20 @@ function App() {
   }
 
   if (!setupStatus.setup_completed) {
-    return (
-      <SetupWizard
-        initialStatus={setupStatus}
-        authenticated={authenticated}
-        onStatusChange={handleSetupStatusChange}
-        onEnterAdmin={handleEnterAdmin}
-      />
-    );
+    return <SetupWizard initialStatus={setupStatus} authenticated={authenticated} onStatusChange={handleSetupStatusChange} onEnterAdmin={handleEnterAdmin} />;
   }
 
   if (window.location.pathname === SETUP_PATH) {
-    return (
-      <SetupWizard
-        initialStatus={setupStatus}
-        authenticated={authenticated}
-        onStatusChange={handleSetupStatusChange}
-        onEnterAdmin={handleEnterAdmin}
-      />
-    );
+    return <SetupWizard initialStatus={setupStatus} authenticated={authenticated} onStatusChange={handleSetupStatusChange} onEnterAdmin={handleEnterAdmin} />;
   }
 
   if (!authenticated) {
-    return (
-      <LoginShell
-        loginPassword={loginPassword}
-        loginError={loginError}
-        onPasswordChange={setLoginPassword}
-        onSubmit={handleLogin}
-      />
-    );
+    return <LoginShell loginPassword={loginPassword} loginError={loginError} onPasswordChange={setLoginPassword} onSubmit={handleLogin} />;
   }
 
   return (
     <main className="shell">
-      <StudioTopbar
-        statusMessage={statusMessage}
-        onOpenSetup={handleOpenSetup}
-        onLogout={() => void handleLogout()}
-      />
+      <StudioTopbar statusMessage={statusMessage} onOpenSetup={handleOpenSetup} onLogout={() => void handleLogout()} />
       <StudioTabs
         activeTab={activeTab}
         onChange={(tab) => {
@@ -503,7 +482,10 @@ function App() {
               setUserQuery(value);
             });
           }}
-          onSelectUser={setSelectedUserId}
+          onSelectUser={(channel, externalUserId) => {
+            setSelectedChannel(channel);
+            setSelectedUserId(externalUserId);
+          }}
         />
 
         <section className="main-panel">
@@ -563,7 +545,10 @@ function App() {
               previewReply={proactiveReply}
               deliveryStatus={proactiveDeliveryStatus}
               onToggleEnabled={(value) => updateProactiveField("enabled", value)}
-              onTargetUserChange={(value) => updateProactiveField("target_wecom_user_id", value)}
+              onTargetUserChange={(channel, externalUserId) => {
+                updateProactiveField("target_channel", channel);
+                updateProactiveField("target_external_user_id", externalUserId);
+              }}
               onWindowToggle={(key, enabled) => updateProactiveWindow(key, { enabled })}
               onWindowTimeChange={(key, value) => updateProactiveWindow(key, { time: value })}
               onQuietHoursToggle={(value) => updateQuietHours("enabled", value)}

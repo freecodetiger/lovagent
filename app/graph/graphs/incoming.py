@@ -16,7 +16,8 @@ from app.graph.tools import message_delivery_tool
 
 async def _save_conversation_node(state: IncomingGraphState) -> IncomingGraphState:
     conversation_id = await save_conversation(
-        user_id=state["user_id"],
+        channel=state["channel"],
+        external_user_id=state["external_user_id"],
         user_message=state["user_content"],
         agent_message=state["agent_response"],
         user_emotion=state["user_emotion"],
@@ -30,7 +31,8 @@ async def _save_conversation_node(state: IncomingGraphState) -> IncomingGraphSta
 
 async def _schedule_memory_node(state: IncomingGraphState) -> IncomingGraphState:
     schedule_memory_processing(
-        wecom_user_id=state["user_id"],
+        channel=state["channel"],
+        external_user_id=state["external_user_id"],
         conversation_id=state["conversation_id"],
         user_message=state["user_content"],
         agent_message=state["agent_response"],
@@ -46,7 +48,8 @@ async def _deliver_reply_node(state: IncomingGraphState) -> IncomingGraphState:
     delivery_result = await message_delivery_tool.ainvoke(
         {
             "delivery_kind": "incoming_reply",
-            "to_user": state["user_id"],
+            "channel": state["channel"],
+            "external_user_id": state["external_user_id"],
             "content": state["agent_response"],
         }
     )

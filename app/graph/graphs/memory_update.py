@@ -15,7 +15,8 @@ from app.graph.subgraphs import get_memory_extraction_subgraph
 
 async def _persist_node(state: MemoryUpdateGraphState) -> MemoryUpdateGraphState:
     await persist_memory_update(
-        wecom_user_id=state["wecom_user_id"],
+        channel=state["channel"],
+        external_user_id=state["external_user_id"],
         conversation_id=state["conversation_id"],
         user_message=state["user_message"],
         agent_message=state["agent_message"],

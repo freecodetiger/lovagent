@@ -57,7 +57,8 @@ export const api = {
   },
   previewPrompt(payload: {
     user_message: string;
-    wecom_user_id?: string | null;
+    channel?: string | null;
+    external_user_id?: string | null;
     draft_config?: PersonaConfig;
   }): Promise<PreviewResponse> {
     return request<PreviewResponse>("/admin-api/persona/preview-prompt", {
@@ -70,7 +71,8 @@ export const api = {
   },
   previewReply(payload: {
     user_message: string;
-    wecom_user_id?: string | null;
+    channel?: string | null;
+    external_user_id?: string | null;
     draft_config?: PersonaConfig;
   }): Promise<PreviewResponse> {
     return request<PreviewResponse>("/admin-api/persona/preview-reply", {
@@ -89,11 +91,11 @@ export const api = {
     params.set("limit", "30");
     return request(`/admin-api/users?${params.toString()}`);
   },
-  getUserMemory(wecomUserId: string): Promise<UserMemory> {
-    return request(`/admin-api/users/${encodeURIComponent(wecomUserId)}/memory`);
+  getUserMemory(channel: string, externalUserId: string): Promise<UserMemory> {
+    return request(`/admin-api/users/${encodeURIComponent(channel)}/${encodeURIComponent(externalUserId)}/memory`);
   },
-  saveUserMemory(wecomUserId: string, payload: UserMemory): Promise<UserMemory> {
-    return request(`/admin-api/users/${encodeURIComponent(wecomUserId)}/memory`, {
+  saveUserMemory(channel: string, externalUserId: string, payload: UserMemory): Promise<UserMemory> {
+    return request(`/admin-api/users/${encodeURIComponent(channel)}/${encodeURIComponent(externalUserId)}/memory`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
@@ -107,19 +109,25 @@ export const api = {
       body: JSON.stringify(payload),
     }).then(normalizeProactiveChatConfig);
   },
-  previewProactiveChat(wecomUserId?: string): Promise<ProactiveChatResponse> {
+  previewProactiveChat(channel?: string, externalUserId?: string): Promise<ProactiveChatResponse> {
     return request<ProactiveChatResponse>("/admin-api/proactive-chat/preview", {
       method: "POST",
-      body: JSON.stringify({ wecom_user_id: wecomUserId || undefined }),
+      body: JSON.stringify({
+        channel: channel || undefined,
+        external_user_id: externalUserId || undefined,
+      }),
     }).then((response) => ({
       ...response,
       config: normalizeProactiveChatConfig(response.config),
     }));
   },
-  runProactiveChatOnce(wecomUserId?: string): Promise<ProactiveChatResponse> {
+  runProactiveChatOnce(channel?: string, externalUserId?: string): Promise<ProactiveChatResponse> {
     return request<ProactiveChatResponse>("/admin-api/proactive-chat/run-once", {
       method: "POST",
-      body: JSON.stringify({ wecom_user_id: wecomUserId || undefined }),
+      body: JSON.stringify({
+        channel: channel || undefined,
+        external_user_id: externalUserId || undefined,
+      }),
     }).then((response) => ({
       ...response,
       config: normalizeProactiveChatConfig(response.config),
