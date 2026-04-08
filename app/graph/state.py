@@ -12,7 +12,8 @@ JsonDict = Dict[str, object]
 
 
 class IncomingGraphState(TypedDict):
-    user_id: str
+    channel: str
+    external_user_id: str
     user_content: str
     persona_config: Dict
     response_constraints: Dict
@@ -34,7 +35,8 @@ class IncomingGraphState(TypedDict):
 class PreviewGraphState(TypedDict):
     preview_mode: Literal["prompt", "reply"]
     user_message: str
-    wecom_user_id: Optional[str]
+    channel: Optional[str]
+    external_user_id: Optional[str]
     draft_config: Optional[Dict]
     persona_config: Dict
     user_memory: Optional[Dict]
@@ -52,7 +54,8 @@ class PreviewGraphState(TypedDict):
 
 
 class ProactiveChatGraphState(TypedDict):
-    target_wecom_user_id: str
+    target_channel: str
+    target_external_user_id: str
     trigger_type: str
     window_key: Optional[str]
     send_delivery: bool
@@ -70,7 +73,8 @@ class ProactiveChatGraphState(TypedDict):
 
 
 class MemoryUpdateGraphState(TypedDict):
-    wecom_user_id: str
+    channel: str
+    external_user_id: str
     conversation_id: int
     user_message: str
     agent_message: str
@@ -95,7 +99,8 @@ def append_tool_trace(state: Dict, name: str) -> List[str]:
 
 def build_incoming_initial_state(payload: Dict[str, object]) -> IncomingGraphState:
     return {
-        "user_id": str(payload.get("user_id") or ""),
+        "channel": str(payload.get("channel") or "wecom").strip() or "wecom",
+        "external_user_id": str(payload.get("external_user_id") or ""),
         "user_content": str(payload.get("user_content") or ""),
         "persona_config": {},
         "response_constraints": {},
@@ -119,7 +124,8 @@ def build_preview_initial_state(payload: Dict[str, object]) -> PreviewGraphState
     return {
         "preview_mode": payload.get("preview_mode", "prompt"),  # type: ignore[typeddict-item]
         "user_message": str(payload.get("user_message") or ""),
-        "wecom_user_id": str(payload.get("wecom_user_id") or "").strip() or None,
+        "channel": str(payload.get("channel") or "").strip() or None,
+        "external_user_id": str(payload.get("external_user_id") or "").strip() or None,
         "draft_config": payload.get("draft_config") if isinstance(payload.get("draft_config"), dict) else None,
         "persona_config": {},
         "user_memory": None,
@@ -139,7 +145,8 @@ def build_preview_initial_state(payload: Dict[str, object]) -> PreviewGraphState
 
 def build_proactive_initial_state(payload: Dict[str, object]) -> ProactiveChatGraphState:
     return {
-        "target_wecom_user_id": str(payload.get("target_wecom_user_id") or ""),
+        "target_channel": str(payload.get("target_channel") or "wecom").strip() or "wecom",
+        "target_external_user_id": str(payload.get("target_external_user_id") or ""),
         "trigger_type": str(payload.get("trigger_type") or ""),
         "window_key": str(payload.get("window_key") or "").strip() or None,
         "send_delivery": bool(payload.get("send_delivery")),
@@ -159,7 +166,8 @@ def build_proactive_initial_state(payload: Dict[str, object]) -> ProactiveChatGr
 
 def build_memory_initial_state(payload: Dict[str, object]) -> MemoryUpdateGraphState:
     return {
-        "wecom_user_id": str(payload.get("wecom_user_id") or ""),
+        "channel": str(payload.get("channel") or "wecom").strip() or "wecom",
+        "external_user_id": str(payload.get("external_user_id") or ""),
         "conversation_id": int(payload.get("conversation_id") or 0),
         "user_message": str(payload.get("user_message") or ""),
         "agent_message": str(payload.get("agent_message") or ""),

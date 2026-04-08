@@ -1,20 +1,23 @@
-"""
+﻿"""
 企业微信回调路由
 """
 
-from fastapi import APIRouter, Request, Query, HTTPException
+import logging
+
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from wechatpy.exceptions import InvalidSignatureException
 
-from app.services.llm_service import glm_service  # 兼容测试 patch
 from app.services.emotion_engine import emotion_engine  # 兼容测试 patch
 from app.services.incoming_aggregation_service import incoming_aggregation_service
+from app.services.llm_service import glm_service  # 兼容测试 patch
 from app.services.memory_service import memory_service  # 兼容测试 patch
 from app.services.multimodal_chat_service import multimodal_chat_service
 from app.services.persona_service import persona_service  # 兼容测试 patch
 from app.services.wecom_service import wecom_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/callback")
@@ -28,7 +31,13 @@ async def wecom_callback_verify(
     企业微信回调 URL 验证
     企业微信会发送 GET 请求来验证回调 URL
     """
-    print(f"收到验证请求: msg_signature={msg_signature}, timestamp={timestamp}, nonce={nonce}, echostr={echostr}")
+    logger.info(
+        "收到验证请求: msg_signature=%s, timestamp=%s, nonce=%s, echostr=%s",
+        msg_signature,
+        timestamp,
+        nonce,
+        echostr,
+    )
 
     if not echostr:
         raise HTTPException(status_code=400, detail="Missing echostr")
@@ -40,14 +49,14 @@ async def wecom_callback_verify(
             nonce=nonce,
             echostr=echostr,
         )
-        print(f"企业微信回调验证成功，返回明文 echostr: {decrypted_echostr}")
+        logger.info("企业微信回调验证成功，返回明文 echostr")
         return PlainTextResponse(content=decrypted_echostr)
     except InvalidSignatureException as exc:
-        print(f"企业微信回调验签失败: {exc}")
-        raise HTTPException(status_code=403, detail="Invalid callback signature")
+        logger.warning("企业微信回调验签失败: %s", exc)
+        raise HTTPException(status_code=403, detail="Invalid callback signature") from exc
     except Exception as exc:
-        print(f"企业微信回调解密失败: {exc}")
-        raise HTTPException(status_code=403, detail=f"Callback verification failed: {exc}")
+        logger.exception("企业微信回调解密失败")
+        raise HTTPException(status_code=403, detail=f"Callback verification failed: {exc}") from exc
 
 
 @router.post("/callback")
@@ -61,26 +70,21 @@ async def wecom_callback_handler(
     企业微信消息回调处理
     接收用户发送的消息并处理
     """
-    # 读取请求体
     body = await request.body()
     xml_content = body.decode("utf-8")
-    print(f"收到消息回调: msg_signature={msg_signature}, xml={xml_content[:200]}...")
+    logger.info("收到消息回调: msg_signature=%s, xml_size=%s", msg_signature, len(xml_content))
 
-    # 解密消息
     try:
-        decrypted_xml = wecom_service.decrypt_message(
-            xml_content, msg_signature, timestamp, nonce
-        )
+        decrypted_xml = wecom_service.decrypt_message(xml_content, msg_signature, timestamp, nonce)
     except InvalidSignatureException as exc:
-        print(f"企业微信消息回调验签失败: {exc}")
-        raise HTTPException(status_code=403, detail="Invalid message signature")
-    except Exception as e:
-        print(f"解密消息失败: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to decrypt message: {e}")
+        logger.warning("企业微信消息回调验签失败: %s", exc)
+        raise HTTPException(status_code=403, detail="Invalid message signature") from exc
+    except Exception as exc:
+        logger.exception("解密消息失败")
+        raise HTTPException(status_code=400, detail=f"Failed to decrypt message: {exc}") from exc
 
-    # 解析消息
     message = wecom_service.parse_message(decrypted_xml)
-    print(f"收到消息: {message}")
+    logger.debug("收到消息: %s", message)
 
     registration = await incoming_aggregation_service.register_event(message)
     if not registration.get("duplicate"):

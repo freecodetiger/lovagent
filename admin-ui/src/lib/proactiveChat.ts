@@ -14,7 +14,8 @@ const DEFAULT_QUIET_HOURS: QuietHours = {
 
 export const DEFAULT_PROACTIVE_CHAT_CONFIG: ProactiveChatConfig = {
   enabled: false,
-  target_wecom_user_id: "",
+  target_channel: "wecom",
+  target_external_user_id: "",
   scheduled_windows: DEFAULT_WINDOWS,
   inactivity_trigger_hours: 6,
   quiet_hours: DEFAULT_QUIET_HOURS,

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+import logging
 
 from langgraph.graph import END, START, StateGraph
 
@@ -22,16 +23,19 @@ from app.services.persona_service import persona_service
 from app.services.proactive_chat_service import proactive_chat_service
 from app.utils.helpers import get_response_constraints
 
+logger = logging.getLogger(__name__)
+
 
 async def _incoming_load_context(state: IncomingGraphState) -> IncomingGraphState:
-    await memory_service.get_or_create_user(state["user_id"])
+    await memory_service.get_or_create_user(state["channel"], state["external_user_id"])
     persona_config = persona_service.get_persona_config()
     response_constraints = get_response_constraints(state["user_content"], persona_config.get("response_preferences"))
-    context = await memory_service.get_conversation_context(state["user_id"])
-    user_memory = await memory_service.get_user_memory(state["user_id"], query_text=state["user_content"])
-    recent_agent_replies = await memory_service.get_recent_agent_replies(state["user_id"], limit=3)
+    context = await memory_service.get_conversation_context(state["channel"], state["external_user_id"])
+    user_memory = await memory_service.get_user_memory(state["channel"], state["external_user_id"], query_text=state["user_content"])
+    recent_agent_replies = await memory_service.get_recent_agent_replies(state["channel"], state["external_user_id"], limit=3)
     context_messages = await memory_service.get_recent_messages(
-        state["user_id"],
+        state["channel"],
+        state["external_user_id"],
         limit=int(response_constraints["context_limit"]),
     )
     return {
@@ -49,10 +53,14 @@ async def _incoming_analyze_emotion(state: IncomingGraphState) -> IncomingGraphS
     try:
         user_emotion = await glm_service.analyze_emotion(state["user_content"])
     except Exception as exc:
-        print(f"图执行情绪分析失败，回退到默认情绪: {exc}")
+        logger.warning("图执行情绪分析失败，回退到默认情绪: %s", exc)
         user_emotion = {"neutral": 1.0}
 
-    agent_emotion = await emotion_engine.update_state(state["user_id"], state["user_content"], user_emotion)
+    agent_emotion = await emotion_engine.update_state(
+        memory_service.build_user_key(state["channel"], state["external_user_id"]),
+        state["user_content"],
+        user_emotion,
+    )
     return {
         "user_emotion": user_emotion,
         "agent_emotion": agent_emotion,
@@ -61,18 +69,19 @@ async def _incoming_analyze_emotion(state: IncomingGraphState) -> IncomingGraphS
 
 
 async def _preview_load_context(state: PreviewGraphState) -> PreviewGraphState:
-    wecom_user_id = str(state.get("wecom_user_id") or "").strip()
+    channel = str(state.get("channel") or "").strip()
+    external_user_id = str(state.get("external_user_id") or "").strip()
     user_memory = None
     context = {}
     recent_agent_replies = []
     context_messages = []
 
-    if wecom_user_id:
-        user_memory = await memory_service.get_user_memory(wecom_user_id, query_text=state["user_message"])
+    if channel and external_user_id:
+        user_memory = await memory_service.get_user_memory(channel, external_user_id, query_text=state["user_message"])
         if user_memory:
-            context = await memory_service.get_conversation_context(wecom_user_id)
-            recent_agent_replies = await memory_service.get_recent_agent_replies(wecom_user_id, limit=3)
-            context_messages = await memory_service.get_recent_messages(wecom_user_id, limit=4)
+            context = await memory_service.get_conversation_context(channel, external_user_id)
+            recent_agent_replies = await memory_service.get_recent_agent_replies(channel, external_user_id, limit=3)
+            context_messages = await memory_service.get_recent_messages(channel, external_user_id, limit=4)
 
     persona_config = state["draft_config"] or persona_service.get_persona_config()
     response_constraints = get_response_constraints(state["user_message"], persona_config.get("response_preferences"))
@@ -90,8 +99,10 @@ async def _preview_load_context(state: PreviewGraphState) -> PreviewGraphState:
 
 async def _preview_analyze_emotion(state: PreviewGraphState) -> PreviewGraphState:
     user_emotion = await glm_service.analyze_emotion(state["user_message"])
+    channel = str(state.get("channel") or "").strip()
+    external_user_id = str(state.get("external_user_id") or "").strip()
     agent_emotion = await emotion_engine.update_state(
-        state.get("wecom_user_id") or "__preview__",
+        memory_service.build_user_key(channel or "__preview__", external_user_id or "__preview__"),
         state["user_message"],
         user_emotion,
     )
@@ -105,9 +116,13 @@ async def _preview_analyze_emotion(state: PreviewGraphState) -> PreviewGraphStat
 async def _proactive_load_context(state: ProactiveChatGraphState) -> ProactiveChatGraphState:
     persona_config = persona_service.get_persona_config()
     proactive_config = proactive_chat_service.get_config()
-    user_memory = await memory_service.get_user_memory(state["target_wecom_user_id"])
-    context = await memory_service.get_conversation_context(state["target_wecom_user_id"])
-    recent_agent_replies = await memory_service.get_recent_agent_replies(state["target_wecom_user_id"], limit=3)
+    user_memory = await memory_service.get_user_memory(state["target_channel"], state["target_external_user_id"])
+    context = await memory_service.get_conversation_context(state["target_channel"], state["target_external_user_id"])
+    recent_agent_replies = await memory_service.get_recent_agent_replies(
+        state["target_channel"],
+        state["target_external_user_id"],
+        limit=3,
+    )
     response_constraints = get_response_constraints(
         "我想主动开启一段自然微信聊天",
         persona_config.get("response_preferences"),

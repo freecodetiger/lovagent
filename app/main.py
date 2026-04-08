@@ -1,21 +1,24 @@
-"""
+﻿"""
 FastAPI 应用入口
 """
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
 from app.config import settings
 from app.models.database import init_db
 from app.routers import admin, setup, wecom
-from app.services.public_media_service import PUBLIC_MEDIA_DIR, PUBLIC_MEDIA_ROUTE
+from app.services.napcat_service import napcat_service
 from app.services.proactive_chat_service import proactive_chat_service
+from app.services.public_media_service import PUBLIC_MEDIA_DIR, PUBLIC_MEDIA_ROUTE
 from app.services.tunnel_service import (
     is_invalid_autodetected_tunnel_url,
     is_quick_tunnel_url,
@@ -27,38 +30,47 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ADMIN_DIST_DIR = BASE_DIR / "admin-ui" / "dist"
 ADMIN_INDEX_PATH = ADMIN_DIST_DIR / "index.html"
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时的初始化逻辑
     init_db()
     tunnel_service.ensure_started()
     tunnel_status = tunnel_service.get_status()
     callback_base_url = tunnel_status["public_url"]
     configured_public_base_url = settings.public_base_url.strip().rstrip("/")
     if not callback_base_url and configured_public_base_url:
-        if not is_quick_tunnel_url(configured_public_base_url) and not is_invalid_autodetected_tunnel_url(configured_public_base_url):
+        if not is_quick_tunnel_url(configured_public_base_url) and not is_invalid_autodetected_tunnel_url(
+            configured_public_base_url
+        ):
             callback_base_url = configured_public_base_url
     callback_url = (
         f"{callback_base_url}/wecom/callback"
         if callback_base_url
         else f"http://{settings.server_host}:{settings.server_port}/wecom/callback"
     )
-    print(f"🚀 恋爱 Agent 启动中...")
-    print(f"📍 服务地址: http://{settings.server_host}:{settings.server_port}")
-    print(f"🔗 企业微信回调地址: {callback_url}")
+    logger.info("恋爱 Agent 启动中...")
+    logger.info("服务地址: http://%s:%s", settings.server_host, settings.server_port)
+    logger.info("企业微信回调地址: %s", callback_url)
+
+    await napcat_service.start()
     proactive_scheduler_task = asyncio.create_task(proactive_chat_service.scheduler_loop())
 
     yield
 
-    # 关闭时的清理逻辑
     proactive_scheduler_task.cancel()
     try:
         await proactive_scheduler_task
     except asyncio.CancelledError:
         pass
-    print("👋 恋爱 Agent 关闭中...")
+    await napcat_service.stop()
+    logger.info("恋爱 Agent 关闭中...")
 
 
 app = FastAPI(
@@ -68,7 +80,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS 中间件配置
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.admin_dev_origins,
@@ -85,7 +96,6 @@ app.add_middleware(
     same_site="lax",
 )
 
-# 注册路由
 app.include_router(wecom.router, prefix="/wecom", tags=["企业微信"])
 app.include_router(admin.router)
 app.include_router(setup.router)

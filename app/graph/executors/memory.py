@@ -11,10 +11,10 @@ from app.models.user import Conversation
 from app.services.memory_service import memory_service
 
 
-async def load_memory_update_context(wecom_user_id: str) -> Tuple[Dict, List[Dict[str, str]]]:
+async def load_memory_update_context(channel: str, external_user_id: str) -> Tuple[Dict, List[Dict[str, str]]]:
     db = SessionLocal()
     try:
-        user = memory_service._get_user_by_wecom_id(db, wecom_user_id)
+        user = memory_service._get_user_by_channel_external_id(db, channel, external_user_id)
         if not user:
             return {}, []
 
@@ -38,7 +38,8 @@ async def load_memory_update_context(wecom_user_id: str) -> Tuple[Dict, List[Dic
 
 async def persist_memory_update(
     *,
-    wecom_user_id: str,
+    channel: str,
+    external_user_id: str,
     conversation_id: int,
     user_message: str,
     agent_message: str,
@@ -47,7 +48,7 @@ async def persist_memory_update(
 ) -> None:
     db = SessionLocal()
     try:
-        user = memory_service._get_user_by_wecom_id(db, wecom_user_id)
+        user = memory_service._get_user_by_channel_external_id(db, channel, external_user_id)
         if not user:
             return
 

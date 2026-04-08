@@ -4,6 +4,7 @@
 
 from collections import defaultdict
 import json
+import logging
 import re
 from typing import Dict, List, Optional, Tuple
 
@@ -11,6 +12,8 @@ import httpx
 
 from app.providers.model_provider import get_chat_provider
 from app.services.runtime_config_service import runtime_config_service
+
+logger = logging.getLogger(__name__)
 
 
 class GLMService:
@@ -313,7 +316,11 @@ class GLMService:
         if not query:
             return {"enabled": config["zhipu_web_search_enabled"], "triggered": False, "query": "", "results": []}
 
-        results = await self.web_search(query)
+        try:
+            results = await self.web_search(query)
+        except Exception as exc:
+            logger.warning("web search unavailable, fallback to no-search context: %s", exc)
+            results = []
         return {
             "enabled": config["zhipu_web_search_enabled"],
             "triggered": bool(results),

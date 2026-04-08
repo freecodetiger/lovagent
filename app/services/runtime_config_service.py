@@ -40,6 +40,10 @@ DEFAULT_RUNTIME_CONFIG = {
         "token": "",
         "encoding_aes_key": "",
     },
+    "napcat": {
+        "ws_url": "",
+        "ws_token": "",
+    },
     "deployment": {
         "public_base_url": "",
     },
@@ -208,6 +212,13 @@ class RuntimeConfigService:
             "encoding_aes_key": config["encoding_aes_key"] or settings.wecom_encoding_aes_key,
         }
 
+    def get_effective_napcat_config(self) -> Dict:
+        config = self.get_config()["napcat"]
+        return {
+            "ws_url": str(config.get("ws_url") or settings.napcat_ws_url).strip(),
+            "ws_token": str(config.get("ws_token") or settings.napcat_ws_token).strip(),
+        }
+
     def get_effective_public_base_url(self) -> str:
         deployment = self.get_config()["deployment"]
         return str(deployment.get("public_base_url") or settings.public_base_url).strip()
@@ -243,6 +254,7 @@ class RuntimeConfigService:
         raw = self.get_config()
         effective_model = self.get_effective_model_config()
         effective_wecom = self.get_effective_wecom_config()
+        effective_napcat = self.get_effective_napcat_config()
         effective_public_base_url = self.get_effective_public_base_url()
         effective_admin_password = self.get_effective_admin_password()
 
@@ -259,6 +271,7 @@ class RuntimeConfigService:
                         effective_wecom["encoding_aes_key"],
                     ]
                 ),
+                "napcat_configured": bool(effective_napcat["ws_url"]),
                 "admin_configured": bool(effective_admin_password),
                 "deployment_configured": bool(effective_public_base_url),
             },
@@ -281,6 +294,8 @@ class RuntimeConfigService:
                 "has_wecom_secret": bool(effective_wecom["secret"]),
                 "has_wecom_token": bool(effective_wecom["token"]),
                 "has_wecom_encoding_aes_key": bool(effective_wecom["encoding_aes_key"]),
+                "napcat_ws_url": effective_napcat["ws_url"],
+                "has_napcat_ws_token": bool(effective_napcat["ws_token"]),
                 "has_admin_password": bool(effective_admin_password),
             },
             "raw": {
@@ -302,6 +317,10 @@ class RuntimeConfigService:
                     "has_secret": bool(raw["wecom"]["secret"]),
                     "has_token": bool(raw["wecom"]["token"]),
                     "has_encoding_aes_key": bool(raw["wecom"]["encoding_aes_key"]),
+                },
+                "napcat": {
+                    "ws_url": raw["napcat"]["ws_url"],
+                    "has_ws_token": bool(raw["napcat"]["ws_token"]),
                 },
                 "deployment": {
                     "public_base_url": raw["deployment"]["public_base_url"],

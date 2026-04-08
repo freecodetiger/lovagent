@@ -1,4 +1,4 @@
-import type { UserSummary } from "../types";
+﻿import type { UserSummary } from "../types";
 
 type UserSidebarProps = {
   userQuery: string;
@@ -6,7 +6,7 @@ type UserSidebarProps = {
   usersLoading: boolean;
   selectedUserId: string;
   onQueryChange: (value: string) => void;
-  onSelectUser: (wecomUserId: string) => void;
+  onSelectUser: (channel: string, externalUserId: string) => void;
 };
 
 export function UserSidebar(props: UserSidebarProps) {
@@ -27,25 +27,23 @@ export function UserSidebar(props: UserSidebarProps) {
           className="search-input"
           value={userQuery}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="搜索企业微信 ID 或昵称"
+          placeholder="搜索用户 ID 或昵称"
         />
 
         <div className="user-list">
           {users.map((user) => (
             <button
-              key={user.wecom_user_id}
-              className={user.wecom_user_id === selectedUserId ? "user-card active" : "user-card"}
-              onClick={() => onSelectUser(user.wecom_user_id)}
+              key={`${user.channel}:${user.external_user_id}`}
+              className={user.external_user_id === selectedUserId ? "user-card active" : "user-card"}
+              onClick={() => onSelectUser(user.channel, user.external_user_id)}
             >
-              <strong>{user.nickname || user.wecom_user_id}</strong>
-              <span>{user.wecom_user_id}</span>
+              <strong>{user.nickname || user.external_user_id}</strong>
+              <span>{user.channel}:{user.external_user_id}</span>
               <em>{user.total_conversations} 次对话</em>
             </button>
           ))}
 
-          {!users.length ? (
-            <p className="empty-state">还没有可编辑的用户，先从企业微信收一条消息。</p>
-          ) : null}
+          {!users.length ? <p className="empty-state">还没有可编辑用户，先收一条消息。</p> : null}
         </div>
       </section>
     </aside>
