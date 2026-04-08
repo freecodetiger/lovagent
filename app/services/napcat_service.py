@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 from typing import Optional
 
@@ -17,6 +18,7 @@ try:
 except Exception:  # pragma: no cover
     websockets = None  # type: ignore[assignment]
 
+logger = logging.getLogger(__name__)
 
 class NapCatService:
     def __init__(self) -> None:
@@ -34,13 +36,13 @@ class NapCatService:
 
     async def start(self) -> None:
         if websockets is None:
-            print("NapCat disabled: websockets is unavailable")
+            logger.warning("NapCat disabled: websockets is unavailable")
             return
         if self._task and not self._task.done():
             return
         cfg = self._config()
         if not str(cfg["ws_url"]).strip():
-            print("NapCat disabled: NAPCAT_WS_URL is empty")
+            logger.warning("NapCat disabled: NAPCAT_WS_URL is empty")
             return
         self._stop_event.clear()
         self._task = asyncio.create_task(self._run_loop())
@@ -82,7 +84,7 @@ class NapCatService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"NapCat connection error: {exc}")
+                logger.warning("NapCat connection error: %s", exc)
             finally:
                 self._ws = None
 

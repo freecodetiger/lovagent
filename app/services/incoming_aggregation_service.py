@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 import hashlib
 from typing import Dict, List
@@ -16,6 +17,7 @@ from app.services.multimodal_chat_service import multimodal_chat_service
 
 
 MERGE_WINDOW_SECONDS = 5
+logger = logging.getLogger(__name__)
 
 
 class IncomingAggregationService:
@@ -203,7 +205,7 @@ class IncomingAggregationService:
         try:
             task.result()
         except Exception as exc:
-            print(f"入站消息聚合处理失败: user={user_id}, error={exc}")
+            logger.exception("入站消息聚合处理失败: user=%s", user_id)
 
     def _get_open_batch(self, db, user_id: str, now: datetime) -> InboundAggregateBatch | None:
         batch = (

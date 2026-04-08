@@ -4,6 +4,7 @@
 
 import asyncio
 from datetime import datetime
+import logging
 import re
 from typing import Dict, Iterable, List, Optional
 
@@ -11,6 +12,8 @@ from app.config import settings
 from app.models.database import SessionLocal
 from app.models.user import Conversation, MemoryItem, ShortTermMemory, User
 from app.utils.helpers import sanitize_input, summarize_recent_agent_replies
+
+logger = logging.getLogger(__name__)
 
 
 MEMORY_ITEM_SALIENCE = {
@@ -369,7 +372,7 @@ class MemoryService:
         try:
             task.result()
         except Exception as exc:
-            print(f"记忆异步提炼失败: {exc}")
+            logger.exception("记忆异步提炼失败")
 
     def _get_user_by_channel_external_id(self, db, channel: str, external_user_id: str) -> Optional[User]:
         return (

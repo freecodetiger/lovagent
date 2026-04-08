@@ -4,7 +4,7 @@
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.schemas.admin import SetupAdminPayload, SetupModelPayload, SetupWeComPayload
+from app.schemas.admin import SetupAdminPayload, SetupModelPayload, SetupNapCatPayload, SetupWeComPayload
 from app.services.runtime_config_service import runtime_config_service
 from app.services.setup_service import setup_service
 from app.services.tunnel_service import tunnel_service
@@ -102,6 +102,19 @@ async def save_setup_wecom(payload: SetupWeComPayload, request: Request):
             "deployment",
             {"public_base_url": payload.public_base_url.strip().rstrip("/")},
         )
+    return setup_service.get_status()
+
+
+@router.put("/config/napcat")
+async def save_setup_napcat(payload: SetupNapCatPayload, request: Request):
+    _require_setup_write_access(request)
+    runtime_config_service.save_section(
+        "napcat",
+        {
+            "ws_url": payload.ws_url.strip(),
+            "ws_token": payload.ws_token.strip(),
+        },
+    )
     return setup_service.get_status()
 
 

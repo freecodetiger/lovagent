@@ -4,6 +4,7 @@ Proactive chat service.
 
 import asyncio
 from datetime import datetime, timedelta
+import logging
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.exc import OperationalError
@@ -12,6 +13,8 @@ from app.config import settings
 from app.models.admin import ProactiveChatConfig, ProactiveChatLog
 from app.models.database import SessionLocal
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_PROACTIVE_CHAT_CONFIG_KEY = "default_proactive_chat"
@@ -160,11 +163,11 @@ class ProactiveChatService:
             try:
                 result = await self.dispatch_due_messages()
                 if result and result.get("delivery", {}).get("status") == "sent":
-                    print(f"主动聊天发送成功: {result['target_channel']}:{result['target_external_user_id']}")
+                    logger.info("主动聊天发送成功: %s:%s", result["target_channel"], result["target_external_user_id"])
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"主动聊天调度异常: {exc}")
+                logger.exception("主动聊天调度异常")
 
             await asyncio.sleep(self.scheduler_interval_seconds)
 

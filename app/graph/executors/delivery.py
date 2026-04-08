@@ -5,6 +5,7 @@ Delivery executors.
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import Dict, Optional
 
 from app.models.admin import ProactiveChatLog
@@ -12,13 +13,15 @@ from app.models.database import SessionLocal
 from app.models.user import Conversation, User
 from app.services.channel_dispatcher import channel_dispatcher
 
+logger = logging.getLogger(__name__)
+
 
 async def deliver_incoming_reply(*, channel: str, external_user_id: str, content: str) -> Dict[str, object]:
     delivery_result: Dict[str, object] = {"attempted": True, "status": "sent"}
     try:
         await channel_dispatcher.send_text(channel, external_user_id, content)
     except Exception as exc:
-        print(f"Send message failed: {exc}")
+        logger.warning("Send message failed: %s", exc)
         delivery_result = {"attempted": True, "status": "failed", "error_message": str(exc)}
     return delivery_result
 
@@ -46,7 +49,7 @@ async def deliver_proactive_outreach(
         )
     except Exception as exc:
         error_message = str(exc)
-        print(f"Proactive delivery failed: {exc}")
+        logger.warning("Proactive delivery failed: %s", exc)
     finally:
         _save_proactive_log(
             target_channel=target_channel,

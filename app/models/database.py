@@ -1,6 +1,8 @@
-"""
+﻿"""
 数据库初始化
 """
+
+import logging
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
@@ -10,6 +12,8 @@ import app.models.admin  # noqa: F401
 import app.models.conversation  # noqa: F401
 import app.models.emotion  # noqa: F401
 from app.models.user import Base
+
+logger = logging.getLogger(__name__)
 
 
 # 创建数据库引擎
@@ -35,7 +39,7 @@ def init_db():
     """初始化数据库，创建所有表"""
     Base.metadata.create_all(bind=engine)
     _run_compat_migrations()
-    print("✅ 数据库表创建完成")
+    logger.info("数据库表创建完成")
 
 
 def _run_compat_migrations() -> None:

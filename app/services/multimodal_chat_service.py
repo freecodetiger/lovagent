@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import mimetypes
+import logging
 from pathlib import Path
 from typing import Dict, List
 
@@ -21,6 +22,8 @@ from app.services.public_media_service import public_media_service
 from app.services.runtime_config_service import runtime_config_service
 from app.services.wecom_service import wecom_service
 from app.utils.helpers import choose_natural_fallback_reply, get_current_time, get_response_constraints, is_response_too_similar
+
+logger = logging.getLogger(__name__)
 
 
 ANTI_REPEAT_RETRY_INSTRUCTION = """
@@ -150,7 +153,7 @@ class MultimodalChatService:
         try:
             user_emotion = await glm_service.analyze_emotion(user_message)
         except Exception as exc:
-            print(f"多模态消息情绪分析失败，回退到默认情绪: {exc}")
+            logger.warning("多模态消息情绪分析失败，回退到默认情绪: %s", exc)
             user_emotion = {"neutral": 1.0}
 
         agent_emotion = await emotion_engine.update_state(user_id, user_message, user_emotion)
@@ -189,7 +192,7 @@ class MultimodalChatService:
                 )
                 reply = retried_reply or reply
         except Exception as exc:
-            print(f"多模态回复生成失败: {exc}")
+            logger.warning("多模态回复生成失败: %s", exc)
 
         final_reply = reply or choose_natural_fallback_reply(user_message, user_emotion)
         conversation_id = await save_conversation(

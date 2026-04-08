@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+import logging
 
 from langgraph.graph import END, START, StateGraph
 
@@ -21,6 +22,8 @@ from app.services.memory_service import memory_service
 from app.services.persona_service import persona_service
 from app.services.proactive_chat_service import proactive_chat_service
 from app.utils.helpers import get_response_constraints
+
+logger = logging.getLogger(__name__)
 
 
 async def _incoming_load_context(state: IncomingGraphState) -> IncomingGraphState:
@@ -50,7 +53,7 @@ async def _incoming_analyze_emotion(state: IncomingGraphState) -> IncomingGraphS
     try:
         user_emotion = await glm_service.analyze_emotion(state["user_content"])
     except Exception as exc:
-        print(f"图执行情绪分析失败，回退到默认情绪: {exc}")
+        logger.warning("图执行情绪分析失败，回退到默认情绪: %s", exc)
         user_emotion = {"neutral": 1.0}
 
     agent_emotion = await emotion_engine.update_state(
