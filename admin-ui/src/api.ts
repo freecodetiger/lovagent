@@ -6,9 +6,7 @@ import type {
   PreviewResponse,
   ProactiveChatConfig,
   ProactiveChatResponse,
-  SetupModelMode,
   SetupModelProvider,
-  SetupModelRouting,
   SetupStatus,
   SetupValidationResult,
   UserMemory,
@@ -129,17 +127,12 @@ export const api = {
     return request("/setup/status");
   },
   saveSetupModel(payload: {
-    model_provider: SetupModelProvider;
-    zhipu_api_key: string;
-    zhipu_model: string;
-    zhipu_thinking_type?: string;
-    multimodal_api_key: string;
-    multimodal_model: string;
-    openai_api_key: string;
-    openai_base_url: string;
-    openai_model_mode: SetupModelMode;
-    openai_model: string;
-    openai_models: SetupModelRouting;
+    provider_id: SetupModelProvider;
+    provider_api_key: string;
+    provider_base_url: string;
+    tavily_api_key: string;
+    exa_api_key: string;
+    search_provider_mode: string;
   }): Promise<SetupStatus> {
     return request("/setup/config/model", {
       method: "PUT",

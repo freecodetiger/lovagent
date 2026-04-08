@@ -11,12 +11,22 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import settings
 from app.models.admin import RuntimeConfig
 from app.models.database import SessionLocal
+from app.services.provider_catalog import get_provider_preset, infer_provider_id, list_provider_presets
 
 
 RUNTIME_CONFIG_KEY = "setup_runtime_config"
 
 DEFAULT_RUNTIME_CONFIG = {
     "model": {
+        "provider_id": "zhipu",
+        "provider_api_key": "",
+        "provider_base_url": "",
+        "text_model_override": "",
+        "multimodal_model_override": "",
+        "document_model_override": "",
+        "search_provider_mode": "tavily_primary_exa_fallback",
+        "tavily_api_key": "",
+        "exa_api_key": "",
         "model_provider": "glm",
         "zhipu_api_key": "",
         "zhipu_model": "glm-5",
@@ -56,6 +66,17 @@ class RuntimeConfigService:
         defaults = deepcopy(DEFAULT_RUNTIME_CONFIG["model"])
         source = incoming if isinstance(incoming, dict) else {}
 
+        defaults["provider_id"] = str(source.get("provider_id", defaults["provider_id"]) or defaults["provider_id"])
+        defaults["provider_api_key"] = str(source.get("provider_api_key", defaults["provider_api_key"]) or "")
+        defaults["provider_base_url"] = str(source.get("provider_base_url", defaults["provider_base_url"]) or "")
+        defaults["text_model_override"] = str(source.get("text_model_override", defaults["text_model_override"]) or "")
+        defaults["multimodal_model_override"] = str(
+            source.get("multimodal_model_override", defaults["multimodal_model_override"]) or ""
+        )
+        defaults["document_model_override"] = str(source.get("document_model_override", defaults["document_model_override"]) or "")
+        defaults["search_provider_mode"] = str(source.get("search_provider_mode", defaults["search_provider_mode"]) or defaults["search_provider_mode"])
+        defaults["tavily_api_key"] = str(source.get("tavily_api_key", defaults["tavily_api_key"]) or "")
+        defaults["exa_api_key"] = str(source.get("exa_api_key", defaults["exa_api_key"]) or "")
         defaults["model_provider"] = str(source.get("model_provider", defaults["model_provider"]) or defaults["model_provider"])
         defaults["zhipu_api_key"] = str(source.get("zhipu_api_key", defaults["zhipu_api_key"]) or "")
         defaults["zhipu_model"] = str(source.get("zhipu_model", defaults["zhipu_model"]) or defaults["zhipu_model"])
@@ -141,62 +162,133 @@ class RuntimeConfigService:
 
     def get_effective_model_config(self) -> Dict:
         config = self.get_config()["model"]
-        openai_model = config["openai_model"] or settings.openai_model
-        openai_models = {
-            "chat_model": str((config.get("openai_models") or {}).get("chat_model") or openai_model),
-            "memory_model": str((config.get("openai_models") or {}).get("memory_model") or openai_model),
-            "proactive_model": str((config.get("openai_models") or {}).get("proactive_model") or openai_model),
-        }
-        multimodal_api_key = (
-            config["multimodal_api_key"]
-            or config["zhipu_api_key"]
-            or settings.zhipu_multimodal_api_key
-            or settings.zhipu_api_key
+        provider_id = infer_provider_id(config)
+        preset = get_provider_preset(provider_id)
+
+        provider_api_key = str(config.get("provider_api_key") or "").strip()
+        if not provider_api_key:
+            if provider_id == "zhipu":
+                provider_api_key = str(config.get("zhipu_api_key") or settings.zhipu_api_key or "").strip()
+            else:
+                provider_api_key = str(config.get("openai_api_key") or settings.openai_api_key or "").strip()
+
+        provider_base_url = str(config.get("provider_base_url") or "").strip().rstrip("/")
+        if not provider_base_url:
+            if preset.transport == "glm":
+                provider_base_url = str(settings.zhipu_base_url).strip().rstrip("/")
+            else:
+                provider_base_url = str(
+                    config.get("openai_base_url") or settings.openai_base_url or preset.default_base_url
+                ).strip().rstrip("/")
+        if not provider_base_url:
+            provider_base_url = preset.default_base_url.rstrip("/")
+
+        if provider_id == "zhipu":
+            text_override = str(config.get("text_model_override") or config.get("zhipu_model") or "").strip()
+        else:
+            text_override = str(config.get("text_model_override") or config.get("openai_model") or "").strip()
+        text_model = text_override or preset.default_text_model
+
+        routed_defaults = preset.default_routed_models
+        legacy_routed = config.get("openai_models") or {}
+        legacy_mode = str(config.get("openai_model_mode") or "manual").strip().lower()
+        if provider_id == "zhipu":
+            text_models = {
+                "chat_model": text_model,
+                "memory_model": text_model,
+                "proactive_model": text_model,
+            }
+        elif legacy_mode == "auto" and any(str(legacy_routed.get(key) or "").strip() for key in routed_defaults):
+            text_models = {
+                "chat_model": str(legacy_routed.get("chat_model") or routed_defaults["chat_model"]).strip(),
+                "memory_model": str(legacy_routed.get("memory_model") or routed_defaults["memory_model"]).strip(),
+                "proactive_model": str(legacy_routed.get("proactive_model") or routed_defaults["proactive_model"]).strip(),
+            }
+        else:
+            base_model = text_model or preset.default_text_model
+            text_models = {
+                "chat_model": base_model,
+                "memory_model": base_model,
+                "proactive_model": base_model,
+            }
+
+        multimodal_api_key = str(config.get("multimodal_api_key") or "").strip() or provider_api_key
+        if provider_id == "zhipu":
+            multimodal_api_key = multimodal_api_key or str(settings.zhipu_multimodal_api_key or settings.zhipu_api_key or "").strip()
+
+        multimodal_override = str(config.get("multimodal_model_override") or "").strip()
+        legacy_multimodal = str(config.get("multimodal_model") or "").strip() if provider_id == "zhipu" else ""
+        multimodal_model = ""
+        if preset.supports_multimodal:
+            multimodal_model = multimodal_override or legacy_multimodal or preset.default_multimodal_model
+        document_model = str(config.get("document_model_override") or "").strip() or preset.default_document_model
+
+        tavily_api_key = str(config.get("tavily_api_key") or settings.tavily_api_key or "").strip()
+        exa_api_key = str(config.get("exa_api_key") or settings.exa_api_key or "").strip()
+        search_provider_mode = str(
+            config.get("search_provider_mode") or settings.search_provider_mode or "tavily_primary_exa_fallback"
+        ).strip()
+        search_enabled = bool(
+            settings.zhipu_web_search_enabled and (
+                (search_provider_mode in {"tavily_primary_exa_fallback", "tavily"} and tavily_api_key)
+                or (search_provider_mode in {"tavily_primary_exa_fallback", "exa"} and exa_api_key)
+            )
         )
-        multimodal_model = config["multimodal_model"] or settings.zhipu_multimodal_model or "glm-4.6v"
+
         return {
-            "model_provider": config["model_provider"] or settings.model_provider,
+            "provider_id": provider_id,
+            "provider_label": preset.label,
+            "provider_transport": preset.transport,
+            "provider_docs_url": preset.docs_url,
+            "provider_api_key": provider_api_key,
+            "provider_base_url": provider_base_url,
+            "default_text_model": preset.default_text_model,
+            "default_multimodal_model": preset.default_multimodal_model,
+            "default_document_model": preset.default_document_model,
+            "text_model": text_model or preset.default_text_model,
+            "text_models": text_models,
+            "document_model": document_model,
+            "supports_multimodal": preset.supports_multimodal,
+            "supports_image": preset.supports_image,
+            "supports_pdf": preset.supports_pdf,
+            "pdf_execution_mode": preset.pdf_execution_mode,
+            "search_provider_mode": search_provider_mode,
+            "search_enabled": search_enabled,
+            "tavily_api_key": tavily_api_key,
+            "exa_api_key": exa_api_key,
+            "model_provider": preset.transport,
             "zhipu_api_key": config["zhipu_api_key"] or settings.zhipu_api_key,
             "zhipu_model": config["zhipu_model"] or settings.zhipu_model,
             "zhipu_thinking_type": config["zhipu_thinking_type"] or settings.zhipu_thinking_type,
             "multimodal_api_key": multimodal_api_key,
             "multimodal_model": multimodal_model,
-            "zhipu_base_url": settings.zhipu_base_url,
+            "zhipu_base_url": provider_base_url if preset.transport == "glm" else settings.zhipu_base_url,
             "zhipu_web_search_enabled": settings.zhipu_web_search_enabled,
             "zhipu_web_search_engine": settings.zhipu_web_search_engine,
             "zhipu_web_search_count": settings.zhipu_web_search_count,
             "zhipu_web_search_content_size": settings.zhipu_web_search_content_size,
-            "openai_api_key": config["openai_api_key"] or settings.openai_api_key,
-            "openai_base_url": config["openai_base_url"] or settings.openai_base_url,
-            "openai_model_mode": config["openai_model_mode"] or "manual",
-            "openai_model": openai_model,
-            "openai_models": openai_models,
+            "openai_api_key": provider_api_key if preset.transport == "openai_compatible" else (config["openai_api_key"] or settings.openai_api_key),
+            "openai_base_url": provider_base_url if preset.transport == "openai_compatible" else (config["openai_base_url"] or settings.openai_base_url),
+            "openai_model_mode": "auto",
+            "openai_model": text_model or settings.openai_model,
+            "openai_models": text_models,
         }
 
     def is_model_configured(self) -> bool:
         model = self.get_effective_model_config()
-        provider = str(model.get("model_provider") or "glm").strip().lower()
-        if provider in {"", "glm"}:
-            return bool(model["zhipu_api_key"] and model["zhipu_model"])
-
-        if provider in {"openai", "openai_compatible"}:
-            if not (model["openai_api_key"] and model["openai_base_url"]):
-                return False
-
-            mode = str(model.get("openai_model_mode") or "manual").strip().lower()
-            if mode == "auto":
-                routed = model.get("openai_models") or {}
-                return all(
-                    str(routed.get(key) or "").strip()
-                    for key in ("chat_model", "memory_model", "proactive_model")
-                )
-            return bool(str(model.get("openai_model") or "").strip())
-
-        return False
+        return bool(
+            str(model.get("provider_api_key") or "").strip()
+            and str(model.get("provider_base_url") or "").strip()
+            and str(model.get("text_model") or "").strip()
+        )
 
     def is_multimodal_configured(self) -> bool:
         model = self.get_effective_model_config()
-        return bool(str(model.get("multimodal_api_key") or "").strip() and str(model.get("multimodal_model") or "").strip())
+        return bool(
+            model.get("supports_multimodal")
+            and str(model.get("multimodal_api_key") or "").strip()
+            and str(model.get("multimodal_model") or "").strip()
+        )
 
     def get_effective_wecom_config(self) -> Dict:
         config = self.get_config()["wecom"]
@@ -247,6 +339,7 @@ class RuntimeConfigService:
         effective_admin_password = self.get_effective_admin_password()
 
         return {
+            "provider_catalog": [preset.to_status_payload() for preset in list_provider_presets()],
             "setup_completed": self.is_setup_complete(),
             "sections": {
                 "model_configured": self.is_model_configured(),
@@ -263,17 +356,36 @@ class RuntimeConfigService:
                 "deployment_configured": bool(effective_public_base_url),
             },
             "current": {
-                "model_provider": effective_model["model_provider"],
+                "provider_id": effective_model["provider_id"],
+                "provider_label": effective_model["provider_label"],
+                "provider_transport": effective_model["provider_transport"],
+                "provider_base_url": effective_model["provider_base_url"],
+                "default_text_model": effective_model["default_text_model"],
+                "default_multimodal_model": effective_model["default_multimodal_model"],
+                "default_document_model": effective_model["default_document_model"],
+                "text_model": effective_model["text_model"],
+                "text_models": deepcopy(effective_model["text_models"]),
+                "document_model": effective_model["document_model"],
+                "supports_multimodal": bool(effective_model["supports_multimodal"]),
+                "supports_image": bool(effective_model["supports_image"]),
+                "supports_pdf": bool(effective_model["supports_pdf"]),
+                "pdf_execution_mode": effective_model["pdf_execution_mode"],
+                "search_provider_mode": effective_model["search_provider_mode"],
+                "search_enabled": bool(effective_model["search_enabled"]),
+                "model_provider": effective_model["provider_id"],
                 "zhipu_model": effective_model["zhipu_model"],
                 "multimodal_model": effective_model["multimodal_model"],
-                "openai_model_mode": effective_model["openai_model_mode"],
-                "openai_base_url": effective_model["openai_base_url"],
-                "openai_model": effective_model["openai_model"],
-                "openai_models": deepcopy(effective_model["openai_models"]),
+                "openai_model_mode": "auto",
+                "openai_base_url": effective_model["provider_base_url"],
+                "openai_model": effective_model["text_model"],
+                "openai_models": deepcopy(effective_model["text_models"]),
                 "public_base_url": effective_public_base_url,
                 "callback_url": self.get_callback_url(),
                 "wecom_corp_id": effective_wecom["corp_id"],
                 "wecom_agent_id": effective_wecom["agent_id"],
+                "has_provider_api_key": bool(effective_model["provider_api_key"]),
+                "has_tavily_api_key": bool(effective_model["tavily_api_key"]),
+                "has_exa_api_key": bool(effective_model["exa_api_key"]),
                 "has_zhipu_api_key": bool(effective_model["zhipu_api_key"]),
                 "has_multimodal_api_key": bool(effective_model["multimodal_api_key"]),
                 "multimodal_configured": self.is_multimodal_configured(),
@@ -285,10 +397,16 @@ class RuntimeConfigService:
             },
             "raw": {
                 "model": {
+                    "provider_id": infer_provider_id(raw["model"]),
+                    "provider_base_url": str(raw["model"].get("provider_base_url") or "").strip(),
+                    "has_provider_api_key": bool(raw["model"].get("provider_api_key")),
+                    "search_provider_mode": str(raw["model"].get("search_provider_mode") or "tavily_primary_exa_fallback"),
+                    "has_tavily_api_key": bool(raw["model"].get("tavily_api_key")),
+                    "has_exa_api_key": bool(raw["model"].get("exa_api_key")),
                     "model_provider": raw["model"]["model_provider"],
                     "zhipu_model": raw["model"]["zhipu_model"],
                     "multimodal_model": raw["model"]["multimodal_model"],
-                    "openai_model_mode": raw["model"]["openai_model_mode"],
+                    "openai_model_mode": "auto",
                     "openai_base_url": raw["model"]["openai_base_url"],
                     "openai_model": raw["model"]["openai_model"],
                     "openai_models": deepcopy(raw["model"]["openai_models"]),

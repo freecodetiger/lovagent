@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import base64
+import mimetypes
 from pathlib import Path
 from typing import Dict, List
 
 from app.graph.executors import save_conversation, schedule_memory_processing
 from app.graph.executors.delivery import deliver_incoming_reply
 from app.prompts.templates import build_dynamic_prompt
+from app.services.attachment_executor_service import attachment_executor_service
 from app.services.emotion_engine import emotion_engine
 from app.services.llm_service import glm_service
 from app.services.memory_service import memory_service
@@ -44,6 +46,15 @@ class MultimodalChatService:
     async def _process_image_message(self, message: Dict[str, object]) -> Dict[str, object]:
         user_id = str(message.get("from_user") or "")
         synthetic_user_message = "[图片] 用户发送了一张图片"
+        model_config = runtime_config_service.get_effective_model_config()
+        provider_label = str(model_config.get("provider_label") or "当前供应商").strip()
+
+        if not model_config.get("supports_image"):
+            return await self._persist_and_deliver_simple(
+                user_id=user_id,
+                user_message=synthetic_user_message,
+                reply=f"{provider_label} 这条接入当前还没有启用图片识别，你可以先把图片里的重点内容用文字发给我，我会继续接住你。",
+            )
 
         if not runtime_config_service.is_multimodal_configured():
             return await self._persist_and_deliver_simple(
@@ -68,12 +79,21 @@ class MultimodalChatService:
         user_id = str(message.get("from_user") or "")
         file_name = str(message.get("file_name") or message.get("title") or "未命名文件").strip() or "未命名文件"
         synthetic_user_message = f"[PDF] 用户发送了文件《{file_name}》"
+        model_config = runtime_config_service.get_effective_model_config()
+        provider_label = str(model_config.get("provider_label") or "当前供应商").strip()
 
         if not file_name.lower().endswith(".pdf"):
             return await self._persist_and_deliver_simple(
                 user_id=user_id,
                 user_message=f"[文件] 用户发送了文件《{file_name}》",
                 reply="我现在只能识别图片和 PDF，其他文件你可以换成文字、截图，或者直接发 PDF 给我。",
+            )
+
+        if not model_config.get("supports_pdf"):
+            return await self._persist_and_deliver_simple(
+                user_id=user_id,
+                user_message=synthetic_user_message,
+                reply=f"{provider_label} 这条接入当前还没有启用 PDF 识别，你可以把重点页截图发我，或者把关键内容贴成文字。",
             )
 
         if not runtime_config_service.is_multimodal_configured():
@@ -102,11 +122,11 @@ class MultimodalChatService:
         user_message: str,
         attachments: List[Dict[str, object]],
     ) -> Dict[str, object]:
-        content_parts = await self._build_content_parts(attachments)
+        prepared_attachments = await self._build_prepared_attachments(attachments)
         return await self._run_multimodal_turn(
             user_id=user_id,
             user_message=user_message,
-            content_parts=content_parts,
+            prepared_attachments=prepared_attachments,
         )
 
     async def _run_multimodal_turn(
@@ -114,7 +134,7 @@ class MultimodalChatService:
         *,
         user_id: str,
         user_message: str,
-        content_parts: List[Dict[str, object]],
+        prepared_attachments: List[Dict[str, object]],
     ) -> Dict[str, object]:
         await memory_service.get_or_create_user(user_id)
         persona_config = persona_service.get_persona_config()
@@ -148,20 +168,20 @@ class MultimodalChatService:
 
         reply = ""
         try:
-            reply = await glm_service.chat_multimodal(
+            reply = await attachment_executor_service.generate_reply(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                content_parts=content_parts,
+                prepared_attachments=prepared_attachments,
                 context_messages=context_messages,
                 temperature=0.88,
                 top_p=0.93,
                 max_tokens=int(response_constraints["max_tokens"]),
             )
             if reply and is_response_too_similar(reply, recent_agent_replies):
-                retried_reply = await glm_service.chat_multimodal(
+                retried_reply = await attachment_executor_service.generate_reply(
                     system_prompt=f"{system_prompt}{ANTI_REPEAT_RETRY_INSTRUCTION}",
                     user_message=user_message,
-                    content_parts=content_parts,
+                    prepared_attachments=prepared_attachments,
                     context_messages=context_messages,
                     temperature=0.92,
                     top_p=0.95,
@@ -221,39 +241,47 @@ class MultimodalChatService:
             "delivery": delivery,
         }
 
-    async def _build_image_content_parts(self, message: Dict[str, object]) -> List[Dict[str, object]]:
+    async def _build_image_attachment(self, message: Dict[str, object]) -> Dict[str, object]:
         media_id = str(message.get("media_id") or "").strip()
         image_url = str(message.get("image_url") or "").strip()
         if media_id:
-            content, _ = await wecom_service.download_media(media_id)
+            content, content_type = await wecom_service.download_media(media_id)
             encoded = base64.b64encode(content).decode("utf-8")
-            return [{"type": "image_url", "image_url": {"url": encoded}}]
+            mime = content_type.split(";")[0].strip() or "image/jpeg"
+            return {"kind": "image", "content_part": {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}}
         if image_url:
-            return [{"type": "image_url", "image_url": {"url": image_url}}]
+            return {"kind": "image", "content_part": {"type": "image_url", "image_url": {"url": image_url}}}
         raise ValueError("Missing image media_id and image_url")
 
-    async def _build_pdf_content_parts(self, message: Dict[str, object], file_name: str) -> List[Dict[str, object]]:
+    async def _build_pdf_attachment(self, message: Dict[str, object], file_name: str) -> Dict[str, object]:
         media_id = str(message.get("media_id") or "").strip()
         if not media_id:
             raise ValueError("Missing PDF media_id")
 
         content, _ = await wecom_service.download_media(media_id)
-        filename = public_media_service.save_binary(content, Path(file_name).suffix or ".pdf")
+        suffix = Path(file_name).suffix or mimetypes.guess_extension("application/pdf") or ".pdf"
+        filename = public_media_service.save_binary(content, suffix)
         public_url = public_media_service.build_public_url(filename)
         if not public_url:
             raise ValueError("Public base URL is unavailable for PDF hosting")
-        return [{"type": "file_url", "file_url": {"url": public_url}}]
+        return {
+            "kind": "pdf",
+            "file_name": file_name,
+            "file_bytes": content,
+            "public_url": public_url,
+            "content_part": {"type": "file_url", "file_url": {"url": public_url}},
+        }
 
-    async def _build_content_parts(self, attachments: List[Dict[str, object]]) -> List[Dict[str, object]]:
-        content_parts: List[Dict[str, object]] = []
+    async def _build_prepared_attachments(self, attachments: List[Dict[str, object]]) -> List[Dict[str, object]]:
+        prepared: List[Dict[str, object]] = []
         for attachment in attachments:
             msg_type = str(attachment.get("msg_type") or "").strip().lower()
             if msg_type == "image":
-                content_parts.extend(await self._build_image_content_parts(attachment))
+                prepared.append(await self._build_image_attachment(attachment))
             elif msg_type == "file":
                 file_name = str(attachment.get("file_name") or "").strip() or "未命名文件.pdf"
-                content_parts.extend(await self._build_pdf_content_parts(attachment, file_name))
-        return content_parts
+                prepared.append(await self._build_pdf_attachment(attachment, file_name))
+        return prepared
 
 
 multimodal_chat_service = MultimodalChatService()

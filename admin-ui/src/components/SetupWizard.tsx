@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import type { SetupModelMode, SetupModelProvider, SetupStatus, SetupValidationResult } from "../types";
+import type { SetupModelProvider, SetupProviderPreset, SetupStatus, SetupValidationResult } from "../types";
 
-const GLM_PLATFORM_URL = "https://open.bigmodel.cn/";
 const WECOM_ADMIN_URL = "https://work.weixin.qq.com/";
 
 type SetupWizardProps = {
@@ -14,18 +13,12 @@ type SetupWizardProps = {
 };
 
 type SetupFormState = {
-  model_provider: SetupModelProvider;
-  zhipu_api_key: string;
-  zhipu_model: string;
-  multimodal_api_key: string;
-  multimodal_model: string;
-  openai_api_key: string;
-  openai_base_url: string;
-  openai_model_mode: SetupModelMode;
-  openai_model: string;
-  chat_model: string;
-  memory_model: string;
-  proactive_model: string;
+  provider_id: SetupModelProvider;
+  provider_api_key: string;
+  provider_base_url: string;
+  tavily_api_key: string;
+  exa_api_key: string;
+  search_provider_mode: string;
   corp_id: string;
   agent_id: string;
   secret: string;
@@ -36,18 +29,12 @@ type SetupFormState = {
 };
 
 const DEFAULT_FORM_STATE: SetupFormState = {
-  model_provider: "glm",
-  zhipu_api_key: "",
-  zhipu_model: "glm-5",
-  multimodal_api_key: "",
-  multimodal_model: "glm-4.6v",
-  openai_api_key: "",
-  openai_base_url: "",
-  openai_model_mode: "manual",
-  openai_model: "",
-  chat_model: "",
-  memory_model: "",
-  proactive_model: "",
+  provider_id: "zhipu",
+  provider_api_key: "",
+  provider_base_url: "",
+  tavily_api_key: "",
+  exa_api_key: "",
+  search_provider_mode: "tavily_primary_exa_fallback",
   corp_id: "",
   agent_id: "",
   secret: "",
@@ -57,18 +44,18 @@ const DEFAULT_FORM_STATE: SetupFormState = {
   admin_password: "",
 };
 
+function findProviderPreset(status: SetupStatus, providerId: SetupModelProvider): SetupProviderPreset | null {
+  return status.provider_catalog.find((item) => item.provider_id === providerId) || null;
+}
+
 function buildFormState(status: SetupStatus): SetupFormState {
+  const providerId = status.current.provider_id || "zhipu";
+  const preset = findProviderPreset(status, providerId);
   return {
     ...DEFAULT_FORM_STATE,
-    model_provider: status.current.model_provider || "glm",
-    zhipu_model: status.current.zhipu_model || "glm-5",
-    multimodal_model: status.current.multimodal_model || status.raw.model.multimodal_model || "glm-4.6v",
-    openai_base_url: status.current.openai_base_url || status.raw.model.openai_base_url || "",
-    openai_model_mode: status.current.openai_model_mode || status.raw.model.openai_model_mode || "manual",
-    openai_model: status.current.openai_model || status.raw.model.openai_model || "",
-    chat_model: status.current.openai_models?.chat_model || status.raw.model.openai_models?.chat_model || "",
-    memory_model: status.current.openai_models?.memory_model || status.raw.model.openai_models?.memory_model || "",
-    proactive_model: status.current.openai_models?.proactive_model || status.raw.model.openai_models?.proactive_model || "",
+    provider_id: providerId,
+    provider_base_url: status.current.provider_base_url || status.raw.model.provider_base_url || preset?.default_base_url || "",
+    search_provider_mode: status.current.search_provider_mode || status.raw.model.search_provider_mode || "tavily_primary_exa_fallback",
     corp_id: status.current.wecom_corp_id || status.raw.wecom.corp_id || "",
     agent_id: status.current.wecom_agent_id || status.raw.wecom.agent_id || "",
     public_base_url: status.current.public_base_url || status.tunnel.public_url || "",
@@ -77,36 +64,26 @@ function buildFormState(status: SetupStatus): SetupFormState {
 
 function buildModelSummary(status: SetupStatus): string {
   const multimodalSummary = status.current.multimodal_configured
-    ? ` / 多模态: ${status.current.multimodal_model || "glm-4.6v"}`
-    : " / 多模态未启用";
-  if (status.current.model_provider === "openai_compatible") {
-    if (status.current.openai_model_mode === "auto") {
-      return `OpenAI-compatible / auto${multimodalSummary}`;
-    }
-    return `OpenAI-compatible / ${status.current.openai_model || "未设置模型"}${multimodalSummary}`;
-  }
-  return `GLM / ${status.current.zhipu_model || "glm-5"}${multimodalSummary}`;
+    ? ` / 多模态: ${status.current.multimodal_model || status.current.default_multimodal_model || "已启用"}`
+    : status.current.supports_multimodal
+      ? " / 多模态待启用"
+      : " / 当前供应商无多模态";
+  return `${status.current.provider_label || "未设置供应商"} / 文本: ${status.current.text_model || "未设置"}${multimodalSummary}`;
 }
 
-function buildModelDraftSummary(form: SetupFormState): string[] {
-  const multimodalLine = `多模态识别：${form.multimodal_model || "未填写"}（图片 / PDF）`;
-  if (form.model_provider === "glm") {
-    return [`当前将使用 GLM`, `主模型：${form.zhipu_model || "未填写"}`, multimodalLine, "保存后即时生效，无需重启后端"];
+function buildModelDraftSummary(preset: SetupProviderPreset | null): string[] {
+  if (!preset) {
+    return ["当前供应商未识别", "保存后即时生效，无需重启后端"];
   }
-
-  if (form.openai_model_mode === "auto") {
-    return [
-      "当前将使用 OpenAI-compatible / Auto 路由",
-      `聊天：${form.chat_model || "未填写"} / 记忆：${form.memory_model || "未填写"} / 主动消息：${form.proactive_model || "未填写"}`,
-      multimodalLine,
-      "保存后即时生效，无需重启后端",
-    ];
-  }
-
+  const multimodalLine = preset.supports_multimodal
+    ? `多模态识别：自动使用 ${preset.default_multimodal_model || "供应商默认视觉模型"}`
+    : "多模态识别：当前供应商未启用";
   return [
-    "当前将使用 OpenAI-compatible / 手动模式",
-    `统一模型：${form.openai_model || "未填写"}`,
-    multimodalLine,
+    `当前将使用 ${preset.label}`,
+    `文本模型：自动使用 ${preset.default_text_model}`,
+    preset.supports_pdf
+      ? `${multimodalLine} / PDF：${preset.default_document_model || "已启用文档模型"}`
+      : multimodalLine,
     "保存后即时生效，无需重启后端",
   ];
 }
@@ -118,25 +95,26 @@ export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEn
   const [validationResult, setValidationResult] = useState<SetupValidationResult | null>(null);
   const [validating, setValidating] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
+  const selectedPreset = findProviderPreset(initialStatus, form.provider_id);
+  const hasStoredProviderKey = initialStatus.current.provider_id === form.provider_id && initialStatus.current.has_provider_api_key;
+  const hasStoredTavilyKey = initialStatus.current.has_tavily_api_key;
+  const hasStoredExaKey = initialStatus.current.has_exa_api_key;
 
   useEffect(() => {
     setForm((current) => ({
       ...current,
-      model_provider: initialStatus.current.model_provider || current.model_provider || "glm",
-      zhipu_model: initialStatus.current.zhipu_model || current.zhipu_model || "glm-5",
-      multimodal_model: initialStatus.current.multimodal_model || current.multimodal_model || "glm-4.6v",
-      openai_base_url: current.openai_base_url || initialStatus.current.openai_base_url || initialStatus.raw.model.openai_base_url || "",
-      openai_model_mode: initialStatus.current.openai_model_mode || current.openai_model_mode || "manual",
-      openai_model: current.openai_model || initialStatus.current.openai_model || initialStatus.raw.model.openai_model || "",
-      chat_model:
-        current.chat_model || initialStatus.current.openai_models?.chat_model || initialStatus.raw.model.openai_models?.chat_model || "",
-      memory_model:
-        current.memory_model || initialStatus.current.openai_models?.memory_model || initialStatus.raw.model.openai_models?.memory_model || "",
-      proactive_model:
-        current.proactive_model ||
-        initialStatus.current.openai_models?.proactive_model ||
-        initialStatus.raw.model.openai_models?.proactive_model ||
+      provider_id: initialStatus.current.provider_id || current.provider_id || "zhipu",
+      provider_base_url:
+        current.provider_base_url ||
+        initialStatus.current.provider_base_url ||
+        initialStatus.raw.model.provider_base_url ||
+        findProviderPreset(initialStatus, initialStatus.current.provider_id || current.provider_id || "zhipu")?.default_base_url ||
         "",
+      search_provider_mode:
+        current.search_provider_mode ||
+        initialStatus.current.search_provider_mode ||
+        initialStatus.raw.model.search_provider_mode ||
+        "tavily_primary_exa_fallback",
       corp_id: current.corp_id || initialStatus.current.wecom_corp_id || initialStatus.raw.wecom.corp_id || "",
       agent_id: current.agent_id || initialStatus.current.wecom_agent_id || initialStatus.raw.wecom.agent_id || "",
       public_base_url:
@@ -152,37 +130,22 @@ export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEn
   }
 
   function validateModelForm(): string {
-    if (form.model_provider === "glm") {
-      if (!form.zhipu_api_key.trim() && !initialStatus.current.has_zhipu_api_key) {
-        return "GLM 模式下请先填写 API Key。";
-      }
-      if (!form.zhipu_model.trim()) {
-        return "GLM 模式下请填写模型名称。";
-      }
-      return "";
+    if (!form.provider_api_key.trim() && !hasStoredProviderKey) {
+      return "请先填写当前供应商的 API Key。";
     }
-
-    if (!form.openai_api_key.trim() && !initialStatus.current.has_openai_api_key) {
-      return "OpenAI-compatible 模式下请先填写 API Key。";
-    }
-    if (!form.openai_base_url.trim()) {
-      return "OpenAI-compatible 模式下请填写 Base URL。";
-    }
-    if (form.openai_model_mode === "manual" && !form.openai_model.trim()) {
-      return "手动模式下请填写模型名称。";
-    }
-    if (form.openai_model_mode === "auto") {
-      if (!form.chat_model.trim()) {
-        return "Auto 模式下请填写聊天模型。";
-      }
-      if (!form.memory_model.trim()) {
-        return "Auto 模式下请填写记忆模型。";
-      }
-      if (!form.proactive_model.trim()) {
-        return "Auto 模式下请填写主动消息模型。";
-      }
+    if (!form.provider_base_url.trim() && !selectedPreset?.default_base_url) {
+      return "当前供应商缺少 Base URL。";
     }
     return "";
+  }
+
+  function handleProviderChange(nextProviderId: SetupModelProvider) {
+    const preset = findProviderPreset(initialStatus, nextProviderId);
+    setForm((current) => ({
+      ...current,
+      provider_id: nextProviderId,
+      provider_base_url: preset?.default_base_url || "",
+    }));
   }
 
   async function refreshStatus() {
@@ -202,21 +165,12 @@ export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEn
     }
     try {
       const nextStatus = await api.saveSetupModel({
-        model_provider: form.model_provider,
-        zhipu_api_key: form.zhipu_api_key,
-        zhipu_model: form.zhipu_model,
-        zhipu_thinking_type: "disabled",
-        multimodal_api_key: form.multimodal_api_key,
-        multimodal_model: form.multimodal_model,
-        openai_api_key: form.openai_api_key,
-        openai_base_url: form.openai_base_url,
-        openai_model_mode: form.openai_model_mode,
-        openai_model: form.openai_model,
-        openai_models: {
-          chat_model: form.chat_model,
-          memory_model: form.memory_model,
-          proactive_model: form.proactive_model,
-        },
+        provider_id: form.provider_id,
+        provider_api_key: form.provider_api_key,
+        provider_base_url: form.provider_base_url,
+        tavily_api_key: form.tavily_api_key,
+        exa_api_key: form.exa_api_key,
+        search_provider_mode: form.search_provider_mode,
       });
       onStatusChange(nextStatus);
       setStatusMessage("模型配置已保存。");
@@ -400,155 +354,104 @@ export function SetupWizard({ initialStatus, authenticated, onStatusChange, onEn
             </div>
             <div className="field-grid">
               <label className="field">
-                <span>Provider</span>
+                <span>供应商</span>
                 <select
-                  value={form.model_provider}
-                  onChange={(event) => updateField("model_provider", event.target.value as SetupModelProvider)}
+                  value={form.provider_id}
+                  onChange={(event) => handleProviderChange(event.target.value as SetupModelProvider)}
                 >
-                  <option value="glm">GLM</option>
-                  <option value="openai_compatible">OpenAI-compatible</option>
+                  {initialStatus.provider_catalog.map((preset) => (
+                    <option key={preset.provider_id} value={preset.provider_id}>
+                      {preset.label}
+                    </option>
+                  ))}
                 </select>
               </label>
-              {form.model_provider === "glm" ? (
-                <>
-                  <label className="field field-span">
-                    <span>GLM API Key</span>
-                    <input
-                      type="password"
-                      value={form.zhipu_api_key}
-                      onChange={(event) => updateField("zhipu_api_key", event.target.value)}
-                      placeholder={initialStatus.current.has_zhipu_api_key ? "已配置，可重新覆盖" : "输入智谱 API Key"}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>模型名称</span>
-                    <select value={form.zhipu_model} onChange={(event) => updateField("zhipu_model", event.target.value)}>
-                      <option value="glm-5">glm-5</option>
-                      <option value="glm-4.5">glm-4.5</option>
-                      <option value="glm-4.5-air">glm-4.5-air</option>
-                    </select>
-                  </label>
-                  <div className="setup-hint-card">
-                    <strong>联网检索</strong>
-                    <span>GLM provider 下会继续启用现有 Web Search 触发逻辑。</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <label className="field field-span">
-                    <span>OpenAI-compatible API Key</span>
-                    <input
-                      type="password"
-                      value={form.openai_api_key}
-                      onChange={(event) => updateField("openai_api_key", event.target.value)}
-                      placeholder={initialStatus.current.has_openai_api_key ? "已配置，可重新覆盖" : "输入兼容接口 API Key"}
-                    />
-                  </label>
-                  <label className="field field-span">
-                    <span>Base URL</span>
-                    <input
-                      value={form.openai_base_url}
-                      onChange={(event) => updateField("openai_base_url", event.target.value)}
-                      placeholder="https://api.example.com/v1"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>模型模式</span>
-                    <select
-                      value={form.openai_model_mode}
-                      onChange={(event) => updateField("openai_model_mode", event.target.value as SetupModelMode)}
-                    >
-                      <option value="manual">手动指定</option>
-                      <option value="auto">Auto 按任务路由</option>
-                    </select>
-                  </label>
-                  {form.openai_model_mode === "manual" ? (
-                    <label className="field">
-                      <span>模型名称</span>
-                      <input
-                        value={form.openai_model}
-                        onChange={(event) => updateField("openai_model", event.target.value)}
-                        placeholder="gpt-4o-mini / qwen-plus / deepseek-chat"
-                      />
-                    </label>
-                  ) : (
-                    <>
-                      <label className="field">
-                        <span>聊天模型</span>
-                        <input
-                          value={form.chat_model}
-                          onChange={(event) => updateField("chat_model", event.target.value)}
-                          placeholder="普通对话 / 回复预览"
-                        />
-                      </label>
-                      <label className="field">
-                        <span>记忆模型</span>
-                        <input
-                          value={form.memory_model}
-                          onChange={(event) => updateField("memory_model", event.target.value)}
-                          placeholder="结构化记忆提炼"
-                        />
-                      </label>
-                      <label className="field">
-                        <span>主动消息模型</span>
-                        <input
-                          value={form.proactive_model}
-                          onChange={(event) => updateField("proactive_model", event.target.value)}
-                          placeholder="主动聊天文案"
-                        />
-                      </label>
-                    </>
-                  )}
-                  <div className="setup-hint-card">
-                    <strong>兼容接口说明</strong>
-                    <span>支持 OpenAI 风格 `/chat/completions` 接口。auto 模式会按聊天、记忆、主动消息三类任务分别选模型。</span>
-                  </div>
-                </>
-              )}
               <label className="field field-span">
-                <span>多模态 GLM API Key</span>
+                <span>API Key</span>
                 <input
                   type="password"
-                  value={form.multimodal_api_key}
-                  onChange={(event) => updateField("multimodal_api_key", event.target.value)}
+                  value={form.provider_api_key}
+                  onChange={(event) => updateField("provider_api_key", event.target.value)}
                   placeholder={
-                    initialStatus.current.has_multimodal_api_key
-                      ? "已配置，可重新覆盖；留空可继续复用"
-                      : "留空时优先复用上面的 GLM API Key"
+                    hasStoredProviderKey
+                      ? "已配置，可重新覆盖"
+                      : `输入 ${selectedPreset?.label || "当前供应商"} API Key`
                   }
                 />
               </label>
-              <label className="field">
-                <span>图片 / PDF 模型</span>
+              <label className="field field-span">
+                <span>Base URL</span>
                 <input
-                  value={form.multimodal_model}
-                  onChange={(event) => updateField("multimodal_model", event.target.value)}
-                  placeholder="glm-4.6v"
+                  value={form.provider_base_url}
+                  onChange={(event) => updateField("provider_base_url", event.target.value)}
+                  placeholder={selectedPreset?.default_base_url || "https://api.example.com/v1"}
+                />
+              </label>
+              <label className="field">
+                <span>搜索后端</span>
+                <select
+                  value={form.search_provider_mode}
+                  onChange={(event) => updateField("search_provider_mode", event.target.value)}
+                >
+                  <option value="tavily_primary_exa_fallback">Tavily 主，Exa 备</option>
+                  <option value="tavily">仅 Tavily</option>
+                  <option value="exa">仅 Exa</option>
+                  <option value="disabled">关闭搜索</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Tavily API Key</span>
+                <input
+                  type="password"
+                  value={form.tavily_api_key}
+                  onChange={(event) => updateField("tavily_api_key", event.target.value)}
+                  placeholder={hasStoredTavilyKey ? "已配置，可重新覆盖" : "可选，用于 AI Search 主通道"}
+                />
+              </label>
+              <label className="field field-span">
+                <span>Exa API Key</span>
+                <input
+                  type="password"
+                  value={form.exa_api_key}
+                  onChange={(event) => updateField("exa_api_key", event.target.value)}
+                  placeholder={hasStoredExaKey ? "已配置，可重新覆盖" : "可选，用于搜索回退与高质量网页抽取"}
                 />
               </label>
               <div className="setup-hint-card">
-                <strong>多模态说明</strong>
-                <span>仅使用具有多模态功能的大模型可识别图像和 PDF。当前图片 / PDF 固定通过 GLM 多模态链路处理。</span>
+                <strong>自动模型选择</strong>
+                <span>你只需要选择供应商。系统会自动选择默认文本模型、图片模型，以及该供应商支持时的 PDF 文档模型。</span>
+              </div>
+              <div className="setup-hint-card">
+                <strong>联网检索</strong>
+                <span>Web Search 现在优先走 Tavily，必要时回退 Exa，不再依赖单一模型厂商的私有搜索能力。</span>
+              </div>
+              <div className="setup-hint-card">
+                <strong>多模态能力</strong>
+                <span>
+                  {selectedPreset?.supports_multimodal
+                    ? `图片识别已启用；${selectedPreset.supports_pdf ? `PDF 会走 ${selectedPreset.pdf_execution_mode === "responses_file_url" ? "专用文档理解链路" : selectedPreset.pdf_execution_mode === "qwen_file_id" ? "文件上传文档理解链路" : "原生 file_url 多模态链路"}。` : "当前仅自动启用图片识别，PDF 会提示降级处理。"}`
+                    : "当前供应商默认不启用多模态，图片和 PDF 会走受控降级提示。"}
+                </span>
               </div>
             </div>
             <div className="setup-model-summary">
-              {buildModelDraftSummary(form).map((line) => (
+              {buildModelDraftSummary(selectedPreset).map((line) => (
                 <p key={line}>{line}</p>
               ))}
             </div>
             <div className="setup-guide-card">
               <div className="setup-guide-header">
-                <strong>{form.model_provider === "glm" ? "先去官方平台获取 API Key" : "准备兼容接口参数"}</strong>
-                {form.model_provider === "glm" ? (
-                  <a className="setup-link" href={GLM_PLATFORM_URL} target="_blank" rel="noreferrer">
-                    打开智谱开放平台
+                <strong>供应商接入说明</strong>
+                {selectedPreset?.docs_url ? (
+                  <a className="setup-link" href={selectedPreset.docs_url} target="_blank" rel="noreferrer">
+                    打开官方文档
                   </a>
                 ) : null}
               </div>
               <p>
-                {form.model_provider === "glm"
-                  ? "登录后在智谱开放平台控制台中创建或查看 API Key，再回到这里粘贴即可。"
-                  : "填写任何 OpenAI 风格兼容接口的 Base URL、API Key 和模型名称即可，模型名称支持自由输入。"}
+                {selectedPreset
+                  ? `选择 ${selectedPreset.label} 后，只需要填写 API Key。Base URL 默认会自动带出，普通用户不需要再手填模型名称。`
+                  : "选择供应商后，系统会自动填充默认接入参数。"}
               </p>
             </div>
           </section>

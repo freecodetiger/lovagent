@@ -83,6 +83,12 @@ class SetupOpenAIModelsPayload(BaseModel):
 
 
 class SetupModelPayload(BaseModel):
+    provider_id: str = "zhipu"
+    provider_api_key: str = ""
+    provider_base_url: str = ""
+    tavily_api_key: str = ""
+    exa_api_key: str = ""
+    search_provider_mode: str = "tavily_primary_exa_fallback"
     model_provider: str = "glm"
     zhipu_api_key: str = ""
     zhipu_model: str = "glm-5"
