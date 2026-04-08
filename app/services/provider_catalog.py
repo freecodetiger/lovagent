@@ -112,11 +112,18 @@ def get_provider_preset(provider_id: str | None) -> ProviderPreset:
 def infer_provider_id(model_config: Dict | None) -> str:
     source = model_config if isinstance(model_config, dict) else {}
 
-    explicit = str(source.get("provider_id") or source.get("model_provider") or "").strip().lower()
-    if explicit in PROVIDER_PRESETS:
-        return explicit
-    if explicit in {"glm"}:
+    explicit_provider_id = str(source.get("provider_id") or "").strip().lower()
+    explicit_transport = str(source.get("model_provider") or "").strip().lower()
+
+    if explicit_provider_id in PROVIDER_PRESETS and not (
+        explicit_provider_id == "zhipu" and explicit_transport in {"openai", "openai_compatible"}
+    ):
+        return explicit_provider_id
+
+    if explicit_transport in {"glm"}:
         return "zhipu"
+    if explicit_transport in {"openai", "openai_compatible"}:
+        return "openai"
 
     base_url = str(source.get("provider_base_url") or source.get("openai_base_url") or "").strip().lower()
     host = urlparse(base_url).netloc.lower()
@@ -127,9 +134,6 @@ def infer_provider_id(model_config: Dict | None) -> str:
     if "deepseek.com" in host:
         return "deepseek"
     if "openai.com" in host:
-        return "openai"
-
-    if explicit in {"openai", "openai_compatible"}:
         return "openai"
 
     return "zhipu"

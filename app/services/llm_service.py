@@ -7,7 +7,7 @@ import json
 import re
 from typing import Dict, List, Optional
 
-from app.providers.model_provider import get_chat_provider
+from app.providers.model_provider import extract_generation_result, get_chat_provider
 from app.services.web_search_service import web_search_service
 from app.services.runtime_config_service import runtime_config_service
 
@@ -25,13 +25,44 @@ class GLMService:
         return str(self._current_config().get("provider_transport") or "glm").strip().lower()
 
     def _resolve_chat_model(self, config: Dict, task_type: str) -> str:
-        routed = config.get("text_models") or {}
+        routed = config.get("text_models") or config.get("openai_models") or {}
         task_key = {
             "chat": "chat_model",
             "memory": "memory_model",
             "proactive": "proactive_model",
         }.get(task_type, "chat_model")
-        return str(routed.get(task_key) or config.get("text_model") or "").strip()
+        return str(routed.get(task_key) or config.get("text_model") or config.get("openai_model") or "").strip()
+
+    async def _request_completion(self, payload: Dict[str, object], *, api_key: str | None = None):
+        config = self._current_config()
+        provider = get_chat_provider(config)
+        if provider is None:
+            raise ValueError(f"Unsupported model provider: {self._current_provider_name()}")
+
+        return await provider.generate(
+            payload["messages"],
+            model=str(payload.get("model") or "").strip(),
+            temperature=float(payload.get("temperature", 0.7)),
+            top_p=float(payload.get("top_p", 0.9)),
+            max_tokens=int(payload.get("max_tokens", 2000)),
+            api_key_override=api_key,
+        )
+
+    async def _request_web_search(self, payload: Dict[str, object]):
+        return await web_search_service.search(
+            str(payload.get("search_query") or "").strip(),
+            count=int(payload.get("count") or 4),
+        )
+
+    def _extract_result_fields(self, response) -> tuple[str, str, str]:
+        if isinstance(response, dict):
+            result = extract_generation_result(response)
+            return result.content or "", result.reasoning_content or "", result.finish_reason or ""
+
+        content = getattr(response, "content", "") or ""
+        reasoning_content = getattr(response, "reasoning_content", "") or ""
+        finish_reason = getattr(response, "finish_reason", "") or ""
+        return content, reasoning_content, finish_reason
 
     async def chat_completion(
         self,
@@ -54,33 +85,23 @@ class GLMService:
             生成的回复内容
         """
         config = self._current_config()
-        provider_name = self._current_provider_name()
-        provider = get_chat_provider(config)
-        if provider is None:
-            raise ValueError(f"Unsupported model provider: {provider_name}")
-
-        result = await provider.generate(
-            messages,
-            model=self._resolve_chat_model(config, task_type),
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-        )
-        content = result.content or ""
-        reasoning_content = result.reasoning_content or ""
-        finish_reason = result.finish_reason or ""
+        payload = {
+            "messages": messages,
+            "model": self._resolve_chat_model(config, task_type),
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+        }
+        result = await self._request_completion(payload)
+        content, reasoning_content, finish_reason = self._extract_result_fields(result)
 
         # 部分模型会先生成 reasoning_content。token 太小时，正文可能为空但 finish_reason=length。
         # 这时提升 token 再重试一次，避免返回空白回复。
         if not content and reasoning_content and finish_reason == "length":
-            retry_result = await provider.generate(
-                messages,
-                model=self._resolve_chat_model(config, task_type),
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max(max_tokens * 4, 512),
-            )
-            retry_content = retry_result.content or ""
+            retry_payload = dict(payload)
+            retry_payload["max_tokens"] = max(max_tokens * 4, 512)
+            retry_result = await self._request_completion(retry_payload)
+            retry_content, _, _ = self._extract_result_fields(retry_result)
             if retry_content:
                 return retry_content
 
@@ -108,7 +129,7 @@ class GLMService:
 
         multimodal_api_key = str(config.get("multimodal_api_key") or "").strip()
         multimodal_model = str(config.get("multimodal_model") or "").strip()
-        if not config.get("supports_multimodal") or not multimodal_api_key or not multimodal_model:
+        if config.get("supports_multimodal") is False or not multimodal_api_key or not multimodal_model:
             raise ValueError("Multimodal model is not configured")
 
         messages: List[Dict[str, object]] = [{"role": "system", "content": system_prompt}]
@@ -124,27 +145,20 @@ class GLMService:
             }
         )
 
-        result = await provider.generate(
-            messages,
-            model=multimodal_model,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            api_key_override=multimodal_api_key,
-        )
-        content = result.content or ""
-        reasoning_content = result.reasoning_content or ""
-        finish_reason = result.finish_reason or ""
+        payload = {
+            "messages": messages,
+            "model": multimodal_model,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+        }
+        result = await self._request_completion(payload, api_key=multimodal_api_key)
+        content, reasoning_content, finish_reason = self._extract_result_fields(result)
         if not content and reasoning_content and finish_reason == "length":
-            retry_result = await provider.generate(
-                messages,
-                model=multimodal_model,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max(max_tokens * 2, 1024),
-                api_key_override=multimodal_api_key,
-            )
-            retry_content = retry_result.content or ""
+            retry_payload = dict(payload)
+            retry_payload["max_tokens"] = max(max_tokens * 2, 1024)
+            retry_result = await self._request_completion(retry_payload, api_key=multimodal_api_key)
+            retry_content, _, _ = self._extract_result_fields(retry_result)
             if retry_content:
                 return retry_content
 
@@ -198,11 +212,34 @@ class GLMService:
         content_size: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         del search_engine, content_size
-        return await web_search_service.search(query, count=search_count)
+        payload = {
+            "search_query": query,
+            "count": search_count or self._current_config().get("web_search_count") or 4,
+            "search_intent": False,
+        }
+        result = await self._request_web_search(payload)
+        if isinstance(result, dict):
+            return result.get("search_result") or []
+        return result
 
     async def maybe_collect_web_context(self, user_message: str) -> Dict[str, object]:
         """根据用户消息判断是否需要联网检索，并返回搜索结果。"""
-        return await web_search_service.maybe_collect_web_context(user_message)
+        config = self._current_config()
+        search_enabled = bool(config.get("search_enabled")) or bool(config.get("web_search_enabled"))
+        if not search_enabled or not self.should_use_web_search(user_message):
+            return {"enabled": search_enabled, "triggered": False, "query": "", "results": []}
+
+        query = self._build_search_query(user_message)
+        if not query:
+            return {"enabled": search_enabled, "triggered": False, "query": "", "results": []}
+
+        results = await self.web_search(query)
+        return {
+            "enabled": search_enabled,
+            "triggered": bool(results),
+            "query": query,
+            "results": results,
+        }
 
     def should_use_web_search(self, text: str) -> bool:
         """启发式判断当前消息是否需要联网检索。"""

@@ -231,7 +231,7 @@ class AdminApiTests(unittest.TestCase):
         payload = {"user_message": "AlphaFold 是什么"}
 
         with patch(
-            "app.routers.admin.glm_service.maybe_collect_web_context",
+            "app.graph.tools.search.web_search_service.maybe_collect_web_context",
             AsyncMock(
                 return_value={
                     "triggered": True,

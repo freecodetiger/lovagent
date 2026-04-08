@@ -66,7 +66,7 @@ class RuntimeConfigService:
         defaults = deepcopy(DEFAULT_RUNTIME_CONFIG["model"])
         source = incoming if isinstance(incoming, dict) else {}
 
-        defaults["provider_id"] = str(source.get("provider_id", defaults["provider_id"]) or defaults["provider_id"])
+        defaults["provider_id"] = infer_provider_id(source)
         defaults["provider_api_key"] = str(source.get("provider_api_key", defaults["provider_api_key"]) or "")
         defaults["provider_base_url"] = str(source.get("provider_base_url", defaults["provider_base_url"]) or "")
         defaults["text_model_override"] = str(source.get("text_model_override", defaults["text_model_override"]) or "")
@@ -152,6 +152,8 @@ class RuntimeConfigService:
             current = deepcopy(record.config_value) if isinstance(record.config_value, dict) else deepcopy(DEFAULT_RUNTIME_CONFIG)
             current.setdefault(section, {})
             current[section].update(payload)
+            if section == "model":
+                current[section]["provider_id"] = infer_provider_id(current[section])
             record.config_value = current
             flag_modified(record, "config_value")
             db.commit()
@@ -217,7 +219,7 @@ class RuntimeConfigService:
             multimodal_api_key = multimodal_api_key or str(settings.zhipu_multimodal_api_key or settings.zhipu_api_key or "").strip()
 
         multimodal_override = str(config.get("multimodal_model_override") or "").strip()
-        legacy_multimodal = str(config.get("multimodal_model") or "").strip() if provider_id == "zhipu" else ""
+        legacy_multimodal = str(config.get("multimodal_model") or "").strip()
         multimodal_model = ""
         if preset.supports_multimodal:
             multimodal_model = multimodal_override or legacy_multimodal or preset.default_multimodal_model
@@ -229,7 +231,7 @@ class RuntimeConfigService:
             config.get("search_provider_mode") or settings.search_provider_mode or "tavily_primary_exa_fallback"
         ).strip()
         search_enabled = bool(
-            settings.zhipu_web_search_enabled and (
+            settings.web_search_enabled and (
                 (search_provider_mode in {"tavily_primary_exa_fallback", "tavily"} and tavily_api_key)
                 or (search_provider_mode in {"tavily_primary_exa_fallback", "exa"} and exa_api_key)
             )
@@ -263,14 +265,14 @@ class RuntimeConfigService:
             "multimodal_api_key": multimodal_api_key,
             "multimodal_model": multimodal_model,
             "zhipu_base_url": provider_base_url if preset.transport == "glm" else settings.zhipu_base_url,
-            "zhipu_web_search_enabled": settings.zhipu_web_search_enabled,
-            "zhipu_web_search_engine": settings.zhipu_web_search_engine,
-            "zhipu_web_search_count": settings.zhipu_web_search_count,
-            "zhipu_web_search_content_size": settings.zhipu_web_search_content_size,
+            "web_search_enabled": settings.web_search_enabled,
+            "web_search_engine": settings.web_search_engine,
+            "web_search_count": settings.web_search_count,
+            "web_search_content_size": settings.web_search_content_size,
             "openai_api_key": provider_api_key if preset.transport == "openai_compatible" else (config["openai_api_key"] or settings.openai_api_key),
             "openai_base_url": provider_base_url if preset.transport == "openai_compatible" else (config["openai_base_url"] or settings.openai_base_url),
             "openai_model_mode": "auto",
-            "openai_model": text_model or settings.openai_model,
+            "openai_model": str(config.get("openai_model") or settings.openai_model or "").strip(),
             "openai_models": text_models,
         }
 
@@ -372,7 +374,7 @@ class RuntimeConfigService:
                 "pdf_execution_mode": effective_model["pdf_execution_mode"],
                 "search_provider_mode": effective_model["search_provider_mode"],
                 "search_enabled": bool(effective_model["search_enabled"]),
-                "model_provider": effective_model["provider_id"],
+                "model_provider": effective_model["provider_transport"],
                 "zhipu_model": effective_model["zhipu_model"],
                 "multimodal_model": effective_model["multimodal_model"],
                 "openai_model_mode": "auto",

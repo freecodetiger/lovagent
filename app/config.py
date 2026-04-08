@@ -11,6 +11,19 @@ from pydantic_settings import BaseSettings
 load_dotenv()
 
 
+def _get_env(*names: str, default: str = "") -> str:
+    """Read the first non-empty env value from a list of aliases."""
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value != "":
+            return value
+    return default
+
+
+def _get_bool_env(*names: str, default: str = "false") -> bool:
+    return _get_env(*names, default=default).lower() in {"1", "true", "yes", "on"}
+
+
 class Settings(BaseSettings):
     """应用配置"""
 
@@ -28,10 +41,10 @@ class Settings(BaseSettings):
     zhipu_multimodal_api_key: str = os.getenv("ZHIPU_MULTIMODAL_API_KEY", "")
     zhipu_multimodal_model: str = os.getenv("ZHIPU_MULTIMODAL_MODEL", "glm-4.6v")
     zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    zhipu_web_search_enabled: bool = os.getenv("ZHIPU_WEB_SEARCH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-    zhipu_web_search_engine: str = os.getenv("ZHIPU_WEB_SEARCH_ENGINE", "search_std")
-    zhipu_web_search_count: int = int(os.getenv("ZHIPU_WEB_SEARCH_COUNT", "4"))
-    zhipu_web_search_content_size: str = os.getenv("ZHIPU_WEB_SEARCH_CONTENT_SIZE", "medium")
+    web_search_enabled: bool = _get_bool_env("WEB_SEARCH_ENABLED", "ZHIPU_WEB_SEARCH_ENABLED", default="true")
+    web_search_engine: str = _get_env("WEB_SEARCH_ENGINE", "ZHIPU_WEB_SEARCH_ENGINE", default="search_std")
+    web_search_count: int = int(_get_env("WEB_SEARCH_COUNT", "ZHIPU_WEB_SEARCH_COUNT", default="4"))
+    web_search_content_size: str = _get_env("WEB_SEARCH_CONTENT_SIZE", "ZHIPU_WEB_SEARCH_CONTENT_SIZE", default="medium")
     search_provider_mode: str = os.getenv("SEARCH_PROVIDER_MODE", "tavily_primary_exa_fallback")
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
     exa_api_key: str = os.getenv("EXA_API_KEY", "")
