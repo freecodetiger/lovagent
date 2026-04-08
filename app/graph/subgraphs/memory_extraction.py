@@ -15,7 +15,7 @@ from app.services.memory_service import memory_service
 
 
 async def _prepare_context(state: MemoryUpdateGraphState) -> MemoryUpdateGraphState:
-    existing_memory, recent_messages = await load_memory_update_context(state["wecom_user_id"])
+    existing_memory, recent_messages = await load_memory_update_context(state["channel"], state["external_user_id"])
     return {
         "existing_memory": existing_memory,
         "recent_messages": recent_messages,

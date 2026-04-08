@@ -4,8 +4,9 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 
 Base = declarative_base()
@@ -15,9 +16,13 @@ class User(Base):
     """用户模型"""
 
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("channel", "external_user_id", name="uq_users_channel_external_user_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    wecom_user_id = Column(String(64), unique=True, nullable=False, comment="企业微信用户ID")
+    channel = Column(String(32), nullable=False, default="wecom", comment="渠道")
+    external_user_id = Column(String(128), nullable=False, comment="渠道侧用户 ID")
     nickname = Column(String(100), comment="用户昵称")
     avatar_url = Column(String(255), comment="头像URL")
 
@@ -47,7 +52,20 @@ class User(Base):
     memory_items = relationship("MemoryItem", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<User(id={self.id}, wecom_user_id={self.wecom_user_id})>"
+        return f"<User(id={self.id}, channel={self.channel}, external_user_id={self.external_user_id})>"
+
+    @hybrid_property
+    def wecom_user_id(self):
+        return self.external_user_id if self.channel == "wecom" else None
+
+    @wecom_user_id.setter
+    def wecom_user_id(self, value):
+        self.channel = "wecom"
+        self.external_user_id = value
+
+    @wecom_user_id.expression
+    def wecom_user_id(cls):  # type: ignore[no-redef]
+        return cls.external_user_id
 
 
 class Conversation(Base):

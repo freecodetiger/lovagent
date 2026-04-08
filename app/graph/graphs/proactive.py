@@ -26,7 +26,8 @@ async def _deliver_node(state: ProactiveChatGraphState) -> ProactiveChatGraphSta
     delivery = await message_delivery_tool.ainvoke(
         {
             "delivery_kind": "proactive_outreach",
-            "to_user": state["target_wecom_user_id"],
+            "channel": state["target_channel"],
+            "external_user_id": state["target_external_user_id"],
             "content": state["reply"],
             "trigger_type": state["trigger_type"],
             "window_key": state["window_key"],

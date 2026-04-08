@@ -1,7 +1,8 @@
 import type { UserMemory } from "../types";
 
 export const EMPTY_MEMORY: UserMemory = {
-  wecom_user_id: "",
+  channel: "",
+  external_user_id: "",
   nickname: "",
   avatar_url: "",
   basic_info: {},
