@@ -19,6 +19,10 @@ __all__ = [
     "runtime_config_service",
     "IncomingAggregationService",
     "incoming_aggregation_service",
+    "NapCatService",
+    "napcat_service",
+    "ChannelDispatcher",
+    "channel_dispatcher",
     "TunnelService",
     "tunnel_service",
 ]
@@ -39,6 +43,10 @@ _SERVICE_EXPORTS = {
     "runtime_config_service": ("app.services.runtime_config_service", "runtime_config_service"),
     "IncomingAggregationService": ("app.services.incoming_aggregation_service", "IncomingAggregationService"),
     "incoming_aggregation_service": ("app.services.incoming_aggregation_service", "incoming_aggregation_service"),
+    "NapCatService": ("app.services.napcat_service", "NapCatService"),
+    "napcat_service": ("app.services.napcat_service", "napcat_service"),
+    "ChannelDispatcher": ("app.services.channel_dispatcher", "ChannelDispatcher"),
+    "channel_dispatcher": ("app.services.channel_dispatcher", "channel_dispatcher"),
     "TunnelService": ("app.services.tunnel_service", "TunnelService"),
     "tunnel_service": ("app.services.tunnel_service", "tunnel_service"),
 }

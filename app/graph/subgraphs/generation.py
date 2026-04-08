@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+import logging
 from typing import Dict, List
 
 from langgraph.graph import END, START, StateGraph
@@ -26,6 +27,8 @@ from app.utils.helpers import (
     get_current_time,
     is_response_too_similar,
 )
+
+logger = logging.getLogger(__name__)
 
 
 ANTI_REPEAT_RETRY_INSTRUCTION = """
@@ -57,7 +60,7 @@ async def _chat_with_retry(
             max_tokens=max_tokens,
         )
     except Exception as exc:
-        print(f"图执行生成失败，尝试轻量重试: {exc}")
+        logger.warning("图执行生成失败，尝试轻量重试: %s", exc)
         try:
             return await glm_service.chat_with_context(
                 system_prompt=system_prompt,
@@ -68,7 +71,7 @@ async def _chat_with_retry(
                 max_tokens=max_tokens,
             )
         except Exception as retry_exc:
-            print(f"图执行轻量重试失败: {retry_exc}")
+            logger.warning("图执行轻量重试失败: %s", retry_exc)
             return ""
 
 
@@ -133,7 +136,7 @@ async def _incoming_retry_similar(state: IncomingGraphState) -> IncomingGraphSta
             max_tokens=int(state["response_constraints"]["max_tokens"]),
         )
     except Exception as exc:
-        print(f"图执行重复抑制重试失败: {exc}")
+        logger.warning("图执行重复抑制重试失败: %s", exc)
 
     return {
         "agent_response": regenerated or state["agent_response"],
@@ -238,7 +241,7 @@ async def _proactive_generate_reply(state: ProactiveChatGraphState) -> Proactive
             task_type="proactive",
         )
     except Exception as exc:
-        print(f"生成主动聊天文案失败，使用兜底: {exc}")
+        logger.warning("生成主动聊天文案失败，使用兜底: %s", exc)
 
     return {
         "reply": reply,
@@ -249,7 +252,8 @@ async def _proactive_generate_reply(state: ProactiveChatGraphState) -> Proactive
 async def _proactive_finalize_reply(state: ProactiveChatGraphState) -> ProactiveChatGraphState:
     return {
         "reply": state["reply"] or proactive_chat_service._build_fallback_message(
-            state["target_wecom_user_id"],
+            state["target_channel"],
+            state["target_external_user_id"],
             state["trigger_type"],
             state["user_memory"],
         ),

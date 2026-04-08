@@ -4,8 +4,7 @@
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.schemas.admin import SetupAdminPayload, SetupModelPayload, SetupWeComPayload
-from app.services.provider_catalog import get_provider_preset
+from app.schemas.admin import SetupAdminPayload, SetupModelPayload, SetupNapCatPayload, SetupWeComPayload
 from app.services.runtime_config_service import runtime_config_service
 from app.services.setup_service import setup_service
 from app.services.tunnel_service import tunnel_service
@@ -20,21 +19,37 @@ def _require_setup_write_access(request: Request) -> None:
 
 
 def _validate_model_payload(payload: SetupModelPayload) -> None:
-    provider_id = payload.provider_id.strip().lower() or "zhipu"
-    preset = get_provider_preset(provider_id)
-    if provider_id != preset.provider_id:
+    provider = payload.model_provider.strip().lower() or "glm"
+    if provider not in {"glm", "openai", "openai_compatible"}:
         raise HTTPException(status_code=400, detail="不支持的模型供应商")
 
-    if not payload.provider_api_key.strip():
-        raise HTTPException(status_code=400, detail=f"{preset.label} 模式下必须填写 API Key")
+    if provider == "glm":
+        if not payload.zhipu_api_key.strip():
+            raise HTTPException(status_code=400, detail="GLM 模式下必须填写 API Key")
+        if not payload.zhipu_model.strip():
+            raise HTTPException(status_code=400, detail="GLM 模式下必须填写模型名称")
+        return
 
-    base_url = payload.provider_base_url.strip().rstrip("/") or preset.default_base_url
-    if not base_url:
-        raise HTTPException(status_code=400, detail=f"{preset.label} 模式下必须填写 Base URL")
+    if not payload.openai_api_key.strip():
+        raise HTTPException(status_code=400, detail="OpenAI-compatible 模式下必须填写 API Key")
+    if not payload.openai_base_url.strip():
+        raise HTTPException(status_code=400, detail="OpenAI-compatible 模式下必须填写 Base URL")
 
-    search_mode = payload.search_provider_mode.strip() or "tavily_primary_exa_fallback"
-    if search_mode not in {"disabled", "tavily_primary_exa_fallback", "tavily", "exa"}:
-        raise HTTPException(status_code=400, detail="不支持的搜索模式")
+    mode = payload.openai_model_mode.strip().lower() or "manual"
+    if mode not in {"manual", "auto"}:
+        raise HTTPException(status_code=400, detail="不支持的模型模式")
+
+    if mode == "manual":
+        if not payload.openai_model.strip():
+            raise HTTPException(status_code=400, detail="手动模式下必须填写模型名称")
+        return
+
+    if not payload.openai_models.chat_model.strip():
+        raise HTTPException(status_code=400, detail="Auto 模式下必须填写聊天模型")
+    if not payload.openai_models.memory_model.strip():
+        raise HTTPException(status_code=400, detail="Auto 模式下必须填写记忆模型")
+    if not payload.openai_models.proactive_model.strip():
+        raise HTTPException(status_code=400, detail="Auto 模式下必须填写主动消息模型")
 
 
 @router.get("/status")
@@ -46,28 +61,18 @@ async def get_setup_status():
 async def save_setup_model(payload: SetupModelPayload, request: Request):
     _require_setup_write_access(request)
     _validate_model_payload(payload)
-    preset = get_provider_preset(payload.provider_id.strip().lower() or "zhipu")
     runtime_config_service.save_section(
         "model",
         {
-            "provider_id": payload.provider_id.strip().lower(),
-            "provider_api_key": payload.provider_api_key.strip(),
-            "provider_base_url": payload.provider_base_url.strip().rstrip("/"),
-            "text_model_override": "",
-            "multimodal_model_override": "",
-            "document_model_override": "",
-            "tavily_api_key": payload.tavily_api_key.strip(),
-            "exa_api_key": payload.exa_api_key.strip(),
-            "search_provider_mode": payload.search_provider_mode.strip() or "tavily_primary_exa_fallback",
-            "model_provider": preset.transport,
-            "zhipu_api_key": payload.zhipu_api_key.strip() or (payload.provider_api_key.strip() if preset.provider_id == "zhipu" else ""),
+            "model_provider": payload.model_provider.strip(),
+            "zhipu_api_key": payload.zhipu_api_key.strip(),
             "zhipu_model": payload.zhipu_model.strip(),
             "zhipu_thinking_type": payload.zhipu_thinking_type.strip(),
-            "multimodal_api_key": payload.multimodal_api_key.strip() or (payload.provider_api_key.strip() if preset.supports_multimodal else ""),
+            "multimodal_api_key": payload.multimodal_api_key.strip(),
             "multimodal_model": payload.multimodal_model.strip(),
-            "openai_api_key": payload.openai_api_key.strip() or (payload.provider_api_key.strip() if preset.transport == "openai_compatible" else ""),
-            "openai_base_url": payload.openai_base_url.strip().rstrip("/") or payload.provider_base_url.strip().rstrip("/"),
-            "openai_model_mode": "auto",
+            "openai_api_key": payload.openai_api_key.strip(),
+            "openai_base_url": payload.openai_base_url.strip().rstrip("/"),
+            "openai_model_mode": payload.openai_model_mode.strip(),
             "openai_model": payload.openai_model.strip(),
             "openai_models": {
                 "chat_model": payload.openai_models.chat_model.strip(),
@@ -97,6 +102,19 @@ async def save_setup_wecom(payload: SetupWeComPayload, request: Request):
             "deployment",
             {"public_base_url": payload.public_base_url.strip().rstrip("/")},
         )
+    return setup_service.get_status()
+
+
+@router.put("/config/napcat")
+async def save_setup_napcat(payload: SetupNapCatPayload, request: Request):
+    _require_setup_write_access(request)
+    runtime_config_service.save_section(
+        "napcat",
+        {
+            "ws_url": payload.ws_url.strip(),
+            "ws_token": payload.ws_token.strip(),
+        },
+    )
     return setup_service.get_status()
 
 

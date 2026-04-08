@@ -4,6 +4,7 @@
 
 import asyncio
 from datetime import datetime
+import logging
 import re
 from typing import Dict, Iterable, List, Optional
 
@@ -11,6 +12,8 @@ from app.config import settings
 from app.models.database import SessionLocal
 from app.models.user import Conversation, MemoryItem, ShortTermMemory, User
 from app.utils.helpers import sanitize_input, summarize_recent_agent_replies
+
+logger = logging.getLogger(__name__)
 
 
 MEMORY_ITEM_SALIENCE = {
@@ -31,12 +34,18 @@ class MemoryService:
         self._background_tasks: set[asyncio.Task] = set()
         self._user_locks: Dict[str, asyncio.Lock] = {}
 
-    async def get_or_create_user(self, wecom_user_id: str) -> Dict:
+    def _resolve_identity(self, channel: str, external_user_id: Optional[str] = None) -> tuple[str, str]:
+        if external_user_id is None:
+            return "wecom", channel
+        return channel, external_user_id
+
+    async def get_or_create_user(self, channel: str, external_user_id: Optional[str] = None) -> Dict:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, wecom_user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
-                user = self._create_user(db, wecom_user_id)
+                user = self._create_user(db, channel, external_user_id)
 
             user.last_interaction = datetime.now()
             user.total_conversations += 1
@@ -49,10 +58,11 @@ class MemoryService:
         finally:
             db.close()
 
-    async def get_conversation_context(self, user_id: str) -> Dict:
+    async def get_conversation_context(self, channel: str, external_user_id: Optional[str] = None) -> Dict:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
                 return {}
 
@@ -90,10 +100,11 @@ class MemoryService:
         finally:
             db.close()
 
-    async def get_recent_messages(self, user_id: str, limit: int = 10) -> List[Dict]:
+    async def get_recent_messages(self, channel: str, external_user_id: Optional[str] = None, limit: int = 10) -> List[Dict]:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
                 return []
 
@@ -110,10 +121,11 @@ class MemoryService:
         finally:
             db.close()
 
-    async def get_recent_agent_replies(self, user_id: str, limit: int = 3) -> List[str]:
+    async def get_recent_agent_replies(self, channel: str, external_user_id: Optional[str] = None, limit: int = 3) -> List[str]:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
                 return []
 
@@ -125,16 +137,23 @@ class MemoryService:
 
     async def save_conversation(
         self,
-        user_id: str,
+        *,
+        channel: Optional[str] = None,
+        external_user_id: Optional[str] = None,
         user_message: str,
         agent_message: str,
         user_emotion: Dict,
         agent_emotion: Dict,
         memories_used: Optional[Dict] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[int]:
+        if user_id and not external_user_id:
+            channel, external_user_id = "wecom", user_id
+        if not channel or not external_user_id:
+            return None
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
                 return None
 
@@ -159,10 +178,17 @@ class MemoryService:
         finally:
             db.close()
 
-    async def update_user_profile(self, user_id: str, profile_update: Dict) -> None:
+    async def update_user_profile(
+        self,
+        channel: str,
+        external_user_id: Optional[str] = None,
+        profile_update: Optional[Dict] = None,
+    ) -> None:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
+        profile_update = profile_update or {}
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
                 return
 
@@ -183,7 +209,7 @@ class MemoryService:
             if cleaned_query:
                 like_value = f"%{cleaned_query}%"
                 user_query = user_query.filter(
-                    (User.wecom_user_id.ilike(like_value)) | (User.nickname.ilike(like_value))
+                    (User.external_user_id.ilike(like_value)) | (User.nickname.ilike(like_value))
                 )
 
             users = (
@@ -195,7 +221,8 @@ class MemoryService:
 
             return [
                 {
-                    "wecom_user_id": user.wecom_user_id,
+                    "channel": user.channel,
+                    "external_user_id": user.external_user_id,
                     "nickname": user.nickname or "",
                     "avatar_url": user.avatar_url or "",
                     "total_conversations": user.total_conversations,
@@ -207,10 +234,11 @@ class MemoryService:
         finally:
             db.close()
 
-    async def get_user_memory(self, wecom_user_id: str, query_text: str = "") -> Optional[Dict]:
+    async def get_user_memory(self, channel: str, external_user_id: Optional[str] = None, query_text: str = "") -> Optional[Dict]:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, wecom_user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
                 return None
 
@@ -228,12 +256,14 @@ class MemoryService:
         finally:
             db.close()
 
-    async def upsert_user_memory(self, wecom_user_id: str, payload: Dict) -> Dict:
+    async def upsert_user_memory(self, channel: str, external_user_id: Optional[str] = None, payload: Dict = None) -> Dict:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
+        payload = payload or {}
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, wecom_user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
-                user = self._create_user(db, wecom_user_id)
+                user = self._create_user(db, channel, external_user_id)
 
             user.nickname = str(payload.get("nickname") or "").strip() or None
             user.avatar_url = str(payload.get("avatar_url") or "").strip() or None
@@ -251,13 +281,14 @@ class MemoryService:
         finally:
             db.close()
 
-        memory = await self.get_user_memory(wecom_user_id)
-        return memory or self._empty_user_memory(wecom_user_id)
+        memory = await self.get_user_memory(channel, external_user_id)
+        return memory or self._empty_user_memory(channel, external_user_id)
 
-    async def get_recent_conversations(self, wecom_user_id: str, limit: int = 8) -> List[Dict]:
+    async def get_recent_conversations(self, channel: str, external_user_id: Optional[str] = None, limit: int = 8) -> List[Dict]:
+        channel, external_user_id = self._resolve_identity(channel, external_user_id)
         db = SessionLocal()
         try:
-            user = self._get_user_by_wecom_id(db, wecom_user_id)
+            user = self._get_user_by_channel_external_id(db, channel, external_user_id)
             if not user:
                 return []
             conversations = self._get_recent_conversations_rows(db, user.id, limit=limit)
@@ -267,13 +298,20 @@ class MemoryService:
 
     def schedule_memory_processing(
         self,
-        wecom_user_id: str,
+        *,
+        channel: str = "wecom",
+        external_user_id: Optional[str] = None,
         conversation_id: Optional[int],
         user_message: str,
         agent_message: str,
         user_emotion: Dict,
         agent_emotion: Dict,
+        wecom_user_id: Optional[str] = None,
     ) -> None:
+        if wecom_user_id and not external_user_id:
+            channel, external_user_id = "wecom", wecom_user_id
+        else:
+            channel, external_user_id = self._resolve_identity(channel, external_user_id)
         if not conversation_id:
             return
 
@@ -284,7 +322,8 @@ class MemoryService:
 
         task = loop.create_task(
             self.process_memory_update(
-                wecom_user_id=wecom_user_id,
+                channel=channel,
+                external_user_id=external_user_id,
                 conversation_id=conversation_id,
                 user_message=user_message,
                 agent_message=agent_message,
@@ -297,20 +336,29 @@ class MemoryService:
 
     async def process_memory_update(
         self,
-        wecom_user_id: str,
+        *,
+        channel: str = "wecom",
+        external_user_id: Optional[str] = None,
         conversation_id: int,
         user_message: str,
         agent_message: str,
         user_emotion: Dict,
         agent_emotion: Dict,
+        wecom_user_id: Optional[str] = None,
     ) -> None:
-        lock = self._user_locks.setdefault(wecom_user_id, asyncio.Lock())
+        if wecom_user_id and not external_user_id:
+            channel, external_user_id = "wecom", wecom_user_id
+        else:
+            channel, external_user_id = self._resolve_identity(channel, external_user_id)
+        user_key = self.build_user_key(channel, external_user_id)
+        lock = self._user_locks.setdefault(user_key, asyncio.Lock())
         async with lock:
             from app.graph import run_memory_update_graph
 
             await run_memory_update_graph(
                 {
-                    "wecom_user_id": wecom_user_id,
+                    "channel": channel,
+                    "external_user_id": external_user_id,
                     "conversation_id": conversation_id,
                     "user_message": user_message,
                     "agent_message": agent_message,
@@ -324,14 +372,19 @@ class MemoryService:
         try:
             task.result()
         except Exception as exc:
-            print(f"记忆异步提炼失败: {exc}")
+            logger.exception("记忆异步提炼失败")
 
-    def _get_user_by_wecom_id(self, db, wecom_user_id: str) -> Optional[User]:
-        return db.query(User).filter(User.wecom_user_id == wecom_user_id).first()
+    def _get_user_by_channel_external_id(self, db, channel: str, external_user_id: str) -> Optional[User]:
+        return (
+            db.query(User)
+            .filter(User.channel == channel, User.external_user_id == external_user_id)
+            .first()
+        )
 
-    def _create_user(self, db, wecom_user_id: str) -> User:
+    def _create_user(self, db, channel: str, external_user_id: str) -> User:
         user = User(
-            wecom_user_id=wecom_user_id,
+            channel=channel,
+            external_user_id=external_user_id,
             profile=self._get_default_profile(),
             basic_info={},
             emotional_patterns={},
@@ -344,6 +397,9 @@ class MemoryService:
         db.commit()
         db.refresh(user)
         return user
+
+    def build_user_key(self, channel: str, external_user_id: str) -> str:
+        return f"{channel}:{external_user_id}"
 
     def _get_or_create_short_term_memory(self, db, user_id: int) -> ShortTermMemory:
         memory = db.query(ShortTermMemory).filter(ShortTermMemory.user_id == user_id).first()
@@ -421,7 +477,8 @@ class MemoryService:
     ) -> Dict:
         profile = user.profile or self._get_default_profile()
         return {
-            "wecom_user_id": user.wecom_user_id,
+            "channel": user.channel,
+            "external_user_id": user.external_user_id,
             "nickname": user.nickname or "",
             "avatar_url": user.avatar_url or "",
             "profile": profile,
@@ -462,9 +519,10 @@ class MemoryService:
             "source_conversation_id": item.source_conversation_id,
         }
 
-    def _empty_user_memory(self, wecom_user_id: str) -> Dict:
+    def _empty_user_memory(self, channel: str, external_user_id: str) -> Dict:
         return {
-            "wecom_user_id": wecom_user_id,
+            "channel": channel,
+            "external_user_id": external_user_id,
             "nickname": "",
             "avatar_url": "",
             "basic_info": {},

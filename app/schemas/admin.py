@@ -35,6 +35,8 @@ class AgentPersonaPayload(BaseModel):
 
 class PreviewRequest(BaseModel):
     user_message: str
+    channel: Optional[str] = None
+    external_user_id: Optional[str] = None
     wecom_user_id: Optional[str] = None
     draft_config: Optional[AgentPersonaPayload] = None
 
@@ -63,6 +65,8 @@ class QuietHoursPayload(BaseModel):
 
 class ProactiveChatPayload(BaseModel):
     enabled: bool = False
+    target_channel: str = "wecom"
+    target_external_user_id: str = ""
     target_wecom_user_id: str = ""
     scheduled_windows: List[ScheduledWindowPayload] = Field(default_factory=list)
     inactivity_trigger_hours: int = 6
@@ -73,6 +77,8 @@ class ProactiveChatPayload(BaseModel):
 
 
 class ProactiveChatActionRequest(BaseModel):
+    channel: Optional[str] = None
+    external_user_id: Optional[str] = None
     wecom_user_id: Optional[str] = None
 
 
@@ -109,6 +115,11 @@ class SetupWeComPayload(BaseModel):
     token: str = ""
     encoding_aes_key: str = ""
     public_base_url: str = ""
+
+
+class SetupNapCatPayload(BaseModel):
+    ws_url: str = ""
+    ws_token: str = ""
 
 
 class SetupAdminPayload(BaseModel):

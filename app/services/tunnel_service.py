@@ -2,6 +2,7 @@
 Cloudflare Tunnel 管理服务
 """
 
+import logging
 import re
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ INVALID_AUTODETECTED_TUNNEL_HOSTS = {
     "developers.cloudflare.com",
     "www.cloudflare.com",
 }
+logger = logging.getLogger(__name__)
 
 
 def extract_quick_tunnel_url(text: str) -> str:
@@ -129,7 +131,7 @@ class TunnelService:
                 continue
 
             self._public_url = public_url
-            print(f"🌐 Cloudflare Quick Tunnel: {public_url}")
+            logger.info("Cloudflare Quick Tunnel: %s", public_url)
 
             configured_public_base_url = runtime_config_service.get_effective_public_base_url()
             if (

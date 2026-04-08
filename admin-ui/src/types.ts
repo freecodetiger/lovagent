@@ -31,7 +31,8 @@ export type PersonaConfig = {
 };
 
 export type UserSummary = {
-  wecom_user_id: string;
+  channel: string;
+  external_user_id: string;
   nickname: string;
   avatar_url: string;
   total_conversations: number;
@@ -50,7 +51,8 @@ export type ConversationItem = {
 };
 
 export type UserMemory = {
-  wecom_user_id: string;
+  channel: string;
+  external_user_id: string;
   nickname: string;
   avatar_url: string;
   basic_info: Record<string, string>;
@@ -83,7 +85,8 @@ export type QuietHours = {
 
 export type ProactiveChatConfig = {
   enabled: boolean;
-  target_wecom_user_id: string;
+  target_channel: string;
+  target_external_user_id: string;
   scheduled_windows: ScheduledWindow[];
   inactivity_trigger_hours: number;
   quiet_hours: QuietHours;
@@ -96,7 +99,8 @@ export type ProactiveChatConfig = {
 export type ProactiveChatResponse = {
   prompt: string;
   reply: string;
-  target_wecom_user_id: string;
+  target_channel: string;
+  target_external_user_id: string;
   user_memory: UserMemory | null;
   config: ProactiveChatConfig;
   delivery?: {

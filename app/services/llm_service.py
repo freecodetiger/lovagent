@@ -1,19 +1,23 @@
 """
-统一大模型调用服务。
+智谱 GLM-5 API 服务
 """
 
 from collections import defaultdict
 import json
+import logging
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+import httpx
 
 from app.providers.model_provider import get_chat_provider
-from app.services.web_search_service import web_search_service
 from app.services.runtime_config_service import runtime_config_service
+
+logger = logging.getLogger(__name__)
 
 
 class GLMService:
-    """统一对话与多模态调用入口。"""
+    """智谱对话模型服务"""
 
     def __init__(self):
         pass
@@ -22,16 +26,76 @@ class GLMService:
         return runtime_config_service.get_effective_model_config()
 
     def _current_provider_name(self) -> str:
-        return str(self._current_config().get("provider_transport") or "glm").strip().lower()
+        return str(self._current_config().get("model_provider") or "glm").strip().lower()
 
     def _resolve_chat_model(self, config: Dict, task_type: str) -> str:
-        routed = config.get("text_models") or {}
-        task_key = {
-            "chat": "chat_model",
-            "memory": "memory_model",
-            "proactive": "proactive_model",
-        }.get(task_type, "chat_model")
-        return str(routed.get(task_key) or config.get("text_model") or "").strip()
+        provider_name = str(config.get("model_provider") or "glm").strip().lower()
+        if provider_name in {"", "glm"}:
+            return str(config.get("zhipu_model") or "").strip()
+
+        mode = str(config.get("openai_model_mode") or "manual").strip().lower()
+        if mode == "auto":
+            routed = config.get("openai_models") or {}
+            task_key = {
+                "chat": "chat_model",
+                "memory": "memory_model",
+                "proactive": "proactive_model",
+            }.get(task_type, "chat_model")
+            return str(routed.get(task_key) or config.get("openai_model") or "").strip()
+
+        return str(config.get("openai_model") or "").strip()
+
+    async def _request_completion(self, payload: Dict, api_key: Optional[str] = None) -> Dict:
+        """请求对话补全接口并返回 JSON 结果。"""
+        config = self._current_config()
+        url = f"{config['zhipu_base_url']}/chat/completions"
+
+        headers = {
+            "Authorization": f"Bearer {api_key or config['zhipu_api_key']}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    async def _request_web_search(self, payload: Dict) -> Dict:
+        """请求智谱 Web Search 接口并返回 JSON 结果。"""
+        config = self._current_config()
+        url = f"{config['zhipu_base_url']}/web_search"
+
+        headers = {
+            "Authorization": f"Bearer {config['zhipu_api_key']}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    def _extract_message(self, result: Dict) -> Tuple[str, str, str]:
+        """提取回复正文、思考内容和结束原因。"""
+        choices = result.get("choices") or []
+        if not choices:
+            return "", "", ""
+
+        choice = choices[0]
+        message = choice.get("message") or {}
+        content = message.get("content") or ""
+        if isinstance(content, list):
+            fragments: List[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    fragments.append(text.strip())
+            content = "\n".join(fragments)
+        reasoning_content = message.get("reasoning_content") or ""
+        finish_reason = choice.get("finish_reason") or ""
+        return content, reasoning_content, finish_reason
 
     async def chat_completion(
         self,
@@ -55,32 +119,40 @@ class GLMService:
         """
         config = self._current_config()
         provider_name = self._current_provider_name()
-        provider = get_chat_provider(config)
-        if provider is None:
-            raise ValueError(f"Unsupported model provider: {provider_name}")
 
-        result = await provider.generate(
-            messages,
-            model=self._resolve_chat_model(config, task_type),
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-        )
-        content = result.content or ""
-        reasoning_content = result.reasoning_content or ""
-        finish_reason = result.finish_reason or ""
+        if provider_name not in {"", "glm"}:
+            provider = get_chat_provider(config)
+            if provider is None:
+                raise ValueError(f"Unsupported model provider: {provider_name}")
 
-        # 部分模型会先生成 reasoning_content。token 太小时，正文可能为空但 finish_reason=length。
-        # 这时提升 token 再重试一次，避免返回空白回复。
-        if not content and reasoning_content and finish_reason == "length":
-            retry_result = await provider.generate(
+            result = await provider.generate(
                 messages,
                 model=self._resolve_chat_model(config, task_type),
                 temperature=temperature,
                 top_p=top_p,
-                max_tokens=max(max_tokens * 4, 512),
+                max_tokens=max_tokens,
             )
-            retry_content = retry_result.content or ""
+            return result.content or ""
+
+        payload = {
+            "model": config["zhipu_model"],
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+        }
+        if config["zhipu_thinking_type"] in {"enabled", "disabled"}:
+            payload["thinking"] = {"type": config["zhipu_thinking_type"]}
+
+        result = await self._request_completion(payload)
+        content, reasoning_content, finish_reason = self._extract_message(result)
+
+        # glm-5 会先生成 reasoning_content。token 太小时，正文可能为空但 finish_reason=length。
+        # 这时提升 token 再重试一次，避免返回空白回复。
+        if not content and reasoning_content and finish_reason == "length":
+            retry_payload = {**payload, "max_tokens": max(max_tokens * 4, 512)}
+            retry_result = await self._request_completion(retry_payload)
+            retry_content, _, _ = self._extract_message(retry_result)
             if retry_content:
                 return retry_content
 
@@ -100,15 +172,11 @@ class GLMService:
         top_p: float = 0.9,
         max_tokens: int = 1500,
     ) -> str:
-        """按当前供应商能力调用多模态模型处理图片或 PDF。"""
+        """调用 GLM 多模态模型处理图片或 PDF。"""
         config = self._current_config()
-        provider = get_chat_provider(config)
-        if provider is None:
-            raise ValueError("Multimodal provider is not available")
-
         multimodal_api_key = str(config.get("multimodal_api_key") or "").strip()
         multimodal_model = str(config.get("multimodal_model") or "").strip()
-        if not config.get("supports_multimodal") or not multimodal_api_key or not multimodal_model:
+        if not multimodal_api_key or not multimodal_model:
             raise ValueError("Multimodal model is not configured")
 
         messages: List[Dict[str, object]] = [{"role": "system", "content": system_prompt}]
@@ -124,27 +192,20 @@ class GLMService:
             }
         )
 
-        result = await provider.generate(
-            messages,
-            model=multimodal_model,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            api_key_override=multimodal_api_key,
-        )
-        content = result.content or ""
-        reasoning_content = result.reasoning_content or ""
-        finish_reason = result.finish_reason or ""
+        payload = {
+            "model": multimodal_model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+        }
+
+        result = await self._request_completion(payload, api_key=multimodal_api_key)
+        content, reasoning_content, finish_reason = self._extract_message(result)
         if not content and reasoning_content and finish_reason == "length":
-            retry_result = await provider.generate(
-                messages,
-                model=multimodal_model,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max(max_tokens * 2, 1024),
-                api_key_override=multimodal_api_key,
-            )
-            retry_content = retry_result.content or ""
+            retry_payload = {**payload, "max_tokens": max(max_tokens * 2, 1024)}
+            retry_result = await self._request_completion(retry_payload, api_key=multimodal_api_key)
+            retry_content, _, _ = self._extract_message(retry_result)
             if retry_content:
                 return retry_content
 
@@ -197,19 +258,151 @@ class GLMService:
         search_count: Optional[int] = None,
         content_size: Optional[str] = None,
     ) -> List[Dict[str, str]]:
-        del search_engine, content_size
-        return await web_search_service.search(query, count=search_count)
+        """调用智谱 Web Search 接口。"""
+        cleaned_query = self._build_search_query(query)
+        if not cleaned_query:
+            return []
+
+        config = self._current_config()
+        provider_name = self._current_provider_name()
+        if provider_name not in {"", "glm"}:
+            return []
+
+        payload = {
+            "search_query": cleaned_query,
+            "search_engine": search_engine or config["zhipu_web_search_engine"],
+            "search_intent": False,
+            "count": search_count or config["zhipu_web_search_count"],
+            "content_size": content_size or config["zhipu_web_search_content_size"],
+        }
+        result = await self._request_web_search(payload)
+        items = result.get("search_result") or result.get("results") or []
+        if not isinstance(items, list):
+            return []
+
+        normalized: List[Dict[str, str]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            title = str(item.get("title") or "").strip()
+            link = str(item.get("link") or item.get("url") or "").strip()
+            content = str(item.get("content") or item.get("snippet") or item.get("text") or "").strip()
+            media = str(item.get("media") or item.get("site_name") or "").strip()
+            publish_date = str(item.get("publish_date") or item.get("date") or "").strip()
+
+            if not any([title, content, link]):
+                continue
+
+            normalized.append(
+                {
+                    "title": title,
+                    "link": link,
+                    "content": content,
+                    "media": media,
+                    "publish_date": publish_date,
+                }
+            )
+
+        return normalized
 
     async def maybe_collect_web_context(self, user_message: str) -> Dict[str, object]:
         """根据用户消息判断是否需要联网检索，并返回搜索结果。"""
-        return await web_search_service.maybe_collect_web_context(user_message)
+        config = self._current_config()
+        if not config["zhipu_web_search_enabled"] or not self.should_use_web_search(user_message):
+            return {"enabled": config["zhipu_web_search_enabled"], "triggered": False, "query": "", "results": []}
+
+        query = self._build_search_query(user_message)
+        if not query:
+            return {"enabled": config["zhipu_web_search_enabled"], "triggered": False, "query": "", "results": []}
+
+        try:
+            results = await self.web_search(query)
+        except Exception as exc:
+            logger.warning("web search unavailable, fallback to no-search context: %s", exc)
+            results = []
+        return {
+            "enabled": config["zhipu_web_search_enabled"],
+            "triggered": bool(results),
+            "query": query,
+            "results": results,
+        }
 
     def should_use_web_search(self, text: str) -> bool:
         """启发式判断当前消息是否需要联网检索。"""
-        return web_search_service.should_use_web_search(text)
+        cleaned = text.strip()
+        if len(cleaned) < 2:
+            return False
+
+        explicit_markers = (
+            "查一下",
+            "搜一下",
+            "搜索",
+            "帮我查",
+            "帮我搜",
+            "是什么",
+            "什么意思",
+            "科普",
+            "介绍一下",
+            "解释一下",
+            "这个词",
+            "这个概念",
+            "这个人",
+            "这个公司",
+            "这个品牌",
+            "这是什么",
+            "谁是",
+            "谁啊",
+        )
+        freshness_markers = (
+            "最新",
+            "最近",
+            "今天",
+            "刚刚",
+            "新闻",
+            "发布",
+            "价格",
+            "汇率",
+            "股价",
+            "比赛",
+            "比分",
+            "天气",
+        )
+        emotional_chat_markers = (
+            "想你",
+            "爱你",
+            "抱抱",
+            "亲亲",
+            "在吗",
+            "晚安",
+            "早安",
+            "宝贝",
+            "陪我",
+        )
+        question_markers = ("?", "？", "吗", "呢", "么", "怎么", "为什么")
+
+        if any(marker in cleaned for marker in explicit_markers):
+            return True
+        if any(marker in cleaned for marker in emotional_chat_markers):
+            return False
+        if any(marker in cleaned for marker in freshness_markers):
+            return True
+
+        ascii_tokens = re.findall(r"[A-Za-z][A-Za-z0-9.+_/-]{1,24}", cleaned)
+        if ascii_tokens and (any(marker in cleaned for marker in question_markers) or len(cleaned) <= 32):
+            return True
+
+        concept_patterns = (
+            r".{0,12}叫.{0,18}吗",
+            r".{0,18}啥意思",
+            r".{0,18}是什么梗",
+            r".{0,18}是什么东西",
+        )
+        return any(re.search(pattern, cleaned) for pattern in concept_patterns)
 
     def _build_search_query(self, text: str) -> str:
-        return web_search_service._build_search_query(text)
+        cleaned = " ".join(text.strip().split())
+        return cleaned[:80]
 
     async def analyze_emotion(self, text: str) -> Dict[str, float]:
         """

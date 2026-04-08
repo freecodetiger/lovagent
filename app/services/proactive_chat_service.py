@@ -1,27 +1,20 @@
-"""
-主动聊天服务
+﻿"""
+Proactive chat service.
 """
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+import logging
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.models.admin import ProactiveChatConfig, ProactiveChatLog
 from app.models.database import SessionLocal
-from app.models.user import Conversation, User
-from app.prompts.templates import (
-    build_morning_greeting,
-    build_night_greeting,
-    build_proactive_prompt,
-)
-from app.services.llm_service import glm_service
-from app.services.memory_service import memory_service
-from app.services.persona_service import persona_service
-from app.services.wecom_service import wecom_service
-from app.utils.helpers import get_response_constraints, get_time_period
+from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_PROACTIVE_CHAT_CONFIG_KEY = "default_proactive_chat"
@@ -33,7 +26,8 @@ DEFAULT_SCHEDULED_WINDOWS = [
 DEFAULT_QUIET_HOURS = {"enabled": True, "start": "23:00", "end": "09:00"}
 DEFAULT_PROACTIVE_CHAT_CONFIG = {
     "enabled": False,
-    "target_wecom_user_id": "",
+    "target_channel": "wecom",
+    "target_external_user_id": "",
     "scheduled_windows": DEFAULT_SCHEDULED_WINDOWS,
     "inactivity_trigger_hours": 6,
     "quiet_hours": DEFAULT_QUIET_HOURS,
@@ -44,7 +38,7 @@ DEFAULT_PROACTIVE_CHAT_CONFIG = {
 
 
 class ProactiveChatService:
-    """主动聊天配置、调度和发送服务。"""
+    """Proactive chat config, scheduling and dispatch."""
 
     def __init__(self):
         self.scheduler_interval_seconds = max(30, settings.proactive_scheduler_interval_seconds)
@@ -67,7 +61,8 @@ class ProactiveChatService:
             return self._build_payload(
                 {
                     "enabled": record.enabled,
-                    "target_wecom_user_id": record.target_wecom_user_id or "",
+                    "target_channel": record.target_channel or "wecom",
+                    "target_external_user_id": record.target_external_user_id or "",
                     "scheduled_windows": record.scheduled_windows or [],
                     "inactivity_trigger_hours": record.inactivity_trigger_hours,
                     "quiet_hours": record.quiet_hours or {},
@@ -99,7 +94,8 @@ class ProactiveChatService:
                 db.add(record)
 
             record.enabled = normalized["enabled"]
-            record.target_wecom_user_id = normalized["target_wecom_user_id"] or None
+            record.target_channel = normalized["target_channel"]
+            record.target_external_user_id = normalized["target_external_user_id"] or None
             record.scheduled_windows = normalized["scheduled_windows"]
             record.inactivity_trigger_hours = normalized["inactivity_trigger_hours"]
             record.quiet_hours = normalized["quiet_hours"]
@@ -113,13 +109,14 @@ class ProactiveChatService:
         finally:
             db.close()
 
-    async def preview_outreach(self, wecom_user_id: Optional[str] = None) -> Dict:
-        target_wecom_user_id = self._resolve_target_user_id(wecom_user_id)
+    async def preview_outreach(self, channel: Optional[str] = None, external_user_id: Optional[str] = None) -> Dict:
+        target_channel, target_external_user_id = self._resolve_target_user(channel, external_user_id)
         from app.graph import run_proactive_chat_graph
 
         payload = await run_proactive_chat_graph(
             {
-                "target_wecom_user_id": target_wecom_user_id,
+                "target_channel": target_channel,
+                "target_external_user_id": target_external_user_id,
                 "trigger_type": "manual",
                 "window_key": None,
                 "send_delivery": False,
@@ -127,13 +124,14 @@ class ProactiveChatService:
         )
         return self._format_graph_payload(payload)
 
-    async def run_outreach_once(self, wecom_user_id: Optional[str] = None) -> Dict:
-        target_wecom_user_id = self._resolve_target_user_id(wecom_user_id)
+    async def run_outreach_once(self, channel: Optional[str] = None, external_user_id: Optional[str] = None) -> Dict:
+        target_channel, target_external_user_id = self._resolve_target_user(channel, external_user_id)
         from app.graph import run_proactive_chat_graph
 
         payload = await run_proactive_chat_graph(
             {
-                "target_wecom_user_id": target_wecom_user_id,
+                "target_channel": target_channel,
+                "target_external_user_id": target_external_user_id,
                 "trigger_type": "manual",
                 "window_key": None,
                 "send_delivery": True,
@@ -151,7 +149,8 @@ class ProactiveChatService:
 
         payload = await run_proactive_chat_graph(
             {
-                "target_wecom_user_id": config["target_wecom_user_id"],
+                "target_channel": config["target_channel"],
+                "target_external_user_id": config["target_external_user_id"],
                 "trigger_type": due["trigger_type"],
                 "window_key": due.get("window_key"),
                 "send_delivery": True,
@@ -164,22 +163,27 @@ class ProactiveChatService:
             try:
                 result = await self.dispatch_due_messages()
                 if result and result.get("delivery", {}).get("status") == "sent":
-                    print(f"主动聊天发送成功: {result['target_wecom_user_id']}")
+                    logger.info("主动聊天发送成功: %s:%s", result["target_channel"], result["target_external_user_id"])
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"主动聊天调度异常: {exc}")
+                logger.exception("主动聊天调度异常")
 
             await asyncio.sleep(self.scheduler_interval_seconds)
 
     def _build_payload(self, config: Dict, updated_at: Optional[str] = None) -> Dict:
         normalized = self._normalize_config(config)
         normalized["updated_at"] = updated_at
+        normalized["target_wecom_user_id"] = (
+            normalized["target_external_user_id"] if normalized["target_channel"] == "wecom" else ""
+        )
         return normalized
 
     def _format_graph_payload(self, payload: Dict) -> Dict:
         return {
-            "target_wecom_user_id": payload["target_wecom_user_id"],
+            "target_channel": payload["target_channel"],
+            "target_external_user_id": payload["target_external_user_id"],
+            "target_wecom_user_id": payload["target_external_user_id"] if payload["target_channel"] == "wecom" else "",
             "trigger_type": payload["trigger_type"],
             "window_key": payload.get("window_key"),
             "prompt": payload.get("prompt", ""),
@@ -199,7 +203,9 @@ class ProactiveChatService:
             return merged
 
         merged["enabled"] = bool(config.get("enabled", merged["enabled"]))
-        merged["target_wecom_user_id"] = str(config.get("target_wecom_user_id") or "").strip()
+        legacy_target = str(config.get("target_wecom_user_id") or "").strip()
+        merged["target_channel"] = str(config.get("target_channel") or "wecom").strip() or "wecom"
+        merged["target_external_user_id"] = str(config.get("target_external_user_id") or legacy_target).strip()
         merged["scheduled_windows"] = self._normalize_scheduled_windows(config.get("scheduled_windows"))
         merged["quiet_hours"] = self._normalize_quiet_hours(config.get("quiet_hours"))
         merged["tone_hint"] = str(config.get("tone_hint") or merged["tone_hint"]).strip() or merged["tone_hint"]
@@ -275,176 +281,34 @@ class ProactiveChatService:
             number = fallback
         return max(minimum, min(maximum, number))
 
-    def _resolve_target_user_id(self, wecom_user_id: Optional[str]) -> str:
-        target_wecom_user_id = str(wecom_user_id or "").strip()
-        if target_wecom_user_id:
-            return target_wecom_user_id
+    def _resolve_target_user(self, channel: Optional[str], external_user_id: Optional[str]) -> Tuple[str, str]:
+        target_channel = str(channel or "").strip()
+        target_external_user_id = str(external_user_id or "").strip()
+        if target_channel and target_external_user_id:
+            return target_channel, target_external_user_id
 
         config = self.get_config()
-        target_wecom_user_id = config["target_wecom_user_id"]
-        if not target_wecom_user_id:
+        target_channel = config["target_channel"]
+        target_external_user_id = config["target_external_user_id"]
+        if not target_external_user_id:
             raise ValueError("请先配置主动聊天目标用户")
-        return target_wecom_user_id
-
-    async def _build_outreach_payload(
-        self,
-        target_wecom_user_id: str,
-        trigger_type: str,
-        window_key: Optional[str] = None,
-    ) -> Dict:
-        persona_config = persona_service.get_persona_config()
-        proactive_config = self.get_config()
-        user_memory = await memory_service.get_user_memory(target_wecom_user_id)
-        context = await memory_service.get_conversation_context(target_wecom_user_id)
-        recent_agent_replies = await memory_service.get_recent_agent_replies(target_wecom_user_id, limit=3)
-        prompt = build_proactive_prompt(
-            trigger_type=trigger_type,
-            current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            persona_config=persona_config,
-            user_profile=user_memory,
-            context=context,
-            recent_agent_replies=recent_agent_replies,
-            tone_hint=proactive_config["tone_hint"],
-        )
-
-        response_constraints = get_response_constraints(
-            "我想主动开启一段自然微信聊天",
-            persona_config.get("response_preferences"),
-        )
-
-        reply = ""
-        try:
-            reply = await glm_service.chat_with_context(
-                system_prompt=prompt,
-                user_message="请直接输出一条现在要主动发给他的微信消息。",
-                context_messages=[],
-                temperature=0.92,
-                top_p=0.95,
-                max_tokens=int(response_constraints["max_tokens"]),
-                task_type="proactive",
-            )
-        except Exception as exc:
-            print(f"生成主动聊天文案失败，使用兜底: {exc}")
-
-        if not reply:
-            reply = self._build_fallback_message(target_wecom_user_id, trigger_type, user_memory)
-
-        return {
-            "target_wecom_user_id": target_wecom_user_id,
-            "trigger_type": trigger_type,
-            "window_key": window_key,
-            "prompt": prompt,
-            "reply": reply,
-            "persona_config": persona_config,
-            "user_memory": user_memory,
-            "config": proactive_config,
-        }
+        return target_channel, target_external_user_id
 
     def _build_fallback_message(
         self,
-        target_wecom_user_id: str,
+        target_channel: str,
+        target_external_user_id: str,
         trigger_type: str,
         user_memory: Optional[Dict],
     ) -> str:
-        nickname = str((user_memory or {}).get("nickname") or "").strip()
-        prefix = f"{nickname}，" if nickname else ""
-        time_period = get_time_period()
-
-        if trigger_type == "scheduled" and time_period == "早晨":
-            return build_morning_greeting()
-        if trigger_type == "scheduled" and time_period in {"夜晚", "深夜"}:
-            return build_night_greeting()
+        _ = (target_channel, target_external_user_id, user_memory)
         if trigger_type == "inactivity":
-            return f"{prefix}刚刚突然想到你了，今天过得怎么样呀？"
-        return f"{prefix}刚刚想起你，想来和你说句话，在忙吗？"
-
-    async def _deliver_outreach(
-        self,
-        target_wecom_user_id: str,
-        trigger_type: str,
-        window_key: Optional[str],
-        content: str,
-    ) -> Dict:
-        sent_at = datetime.now()
-        status = "failed"
-        error_message = None
-
-        try:
-            await wecom_service.send_text_message(target_wecom_user_id, content)
-            status = "sent"
-            self._save_proactive_conversation(target_wecom_user_id, content, sent_at)
-        except Exception as exc:
-            error_message = str(exc)
-            print(f"主动聊天发送失败: {exc}")
-        finally:
-            self._save_log(
-                target_wecom_user_id=target_wecom_user_id,
-                trigger_type=trigger_type,
-                window_key=window_key,
-                content=content,
-                status=status,
-                error_message=error_message,
-                sent_at=sent_at,
-            )
-
-        return {
-            "attempted": True,
-            "status": status,
-            "error_message": error_message,
-            "sent_at": sent_at.isoformat(),
-        }
-
-    def _save_proactive_conversation(self, target_wecom_user_id: str, content: str, sent_at: datetime) -> None:
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.wecom_user_id == target_wecom_user_id).first()
-            if not user:
-                return
-
-            conversation = Conversation(
-                user_id=user.id,
-                user_message="",
-                agent_message=content,
-                user_emotion=None,
-                agent_emotion="happy",
-                agent_emotion_intensity=40,
-                context_used=True,
-                memories_used={"source": "proactive"},
-                created_at=sent_at,
-            )
-            db.add(conversation)
-            db.commit()
-        finally:
-            db.close()
-
-    def _save_log(
-        self,
-        target_wecom_user_id: str,
-        trigger_type: str,
-        window_key: Optional[str],
-        content: str,
-        status: str,
-        error_message: Optional[str],
-        sent_at: datetime,
-    ) -> None:
-        db = SessionLocal()
-        try:
-            log = ProactiveChatLog(
-                target_wecom_user_id=target_wecom_user_id,
-                trigger_type=trigger_type,
-                window_key=window_key,
-                content=content,
-                status=status,
-                error_message=error_message,
-                sent_at=sent_at,
-            )
-            db.add(log)
-            db.commit()
-        finally:
-            db.close()
+            return "刚刚突然想到你了，今天过得怎么样呀？"
+        return "刚刚想起你，想来和你说句话，在忙吗？"
 
     def _resolve_due_trigger(self, config: Dict) -> Optional[Dict]:
-        if not config.get("enabled") or not config.get("target_wecom_user_id"):
+        config = self._normalize_config(config)
+        if not config.get("enabled") or not config.get("target_external_user_id"):
             return None
 
         now = datetime.now()
@@ -453,7 +317,14 @@ class ProactiveChatService:
 
         db = SessionLocal()
         try:
-            user = db.query(User).filter(User.wecom_user_id == config["target_wecom_user_id"]).first()
+            user = (
+                db.query(User)
+                .filter(
+                    User.channel == config["target_channel"],
+                    User.external_user_id == config["target_external_user_id"],
+                )
+                .first()
+            )
             if not user:
                 return None
 
@@ -463,10 +334,10 @@ class ProactiveChatService:
                 if minutes_since_last_interaction < config["min_interval_minutes"]:
                     return None
 
-            if self._count_sent_today(db, config["target_wecom_user_id"], now) >= config["max_messages_per_day"]:
+            if self._count_sent_today(db, config["target_channel"], config["target_external_user_id"], now) >= config["max_messages_per_day"]:
                 return None
 
-            last_sent = self._get_last_success_log(db, config["target_wecom_user_id"])
+            last_sent = self._get_last_success_log(db, config["target_channel"], config["target_external_user_id"])
             if last_sent and (now - last_sent.sent_at).total_seconds() / 60 < config["min_interval_minutes"]:
                 return None
 
@@ -475,7 +346,8 @@ class ProactiveChatService:
                     continue
                 if self._is_window_due(now, window["time"]) and not self._window_sent_today(
                     db,
-                    config["target_wecom_user_id"],
+                    config["target_channel"],
+                    config["target_external_user_id"],
                     window["key"],
                     now,
                 ):
@@ -484,7 +356,12 @@ class ProactiveChatService:
             if (
                 last_interaction
                 and now - last_interaction >= timedelta(hours=config["inactivity_trigger_hours"])
-                and not self._already_sent_inactivity_since(db, config["target_wecom_user_id"], last_interaction)
+                and not self._already_sent_inactivity_since(
+                    db,
+                    config["target_channel"],
+                    config["target_external_user_id"],
+                    last_interaction,
+                )
             ):
                 return {"trigger_type": "inactivity", "window_key": None}
         finally:
@@ -510,13 +387,14 @@ class ProactiveChatService:
             return start <= current < end
         return current >= start or current < end
 
-    def _count_sent_today(self, db, target_wecom_user_id: str, now: datetime) -> int:
+    def _count_sent_today(self, db, target_channel: str, target_external_user_id: str, now: datetime) -> int:
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = start_of_day + timedelta(days=1)
         return (
             db.query(ProactiveChatLog)
             .filter(
-                ProactiveChatLog.target_wecom_user_id == target_wecom_user_id,
+                ProactiveChatLog.target_channel == target_channel,
+                ProactiveChatLog.target_external_user_id == target_external_user_id,
                 ProactiveChatLog.status == "sent",
                 ProactiveChatLog.sent_at >= start_of_day,
                 ProactiveChatLog.sent_at < end_of_day,
@@ -524,13 +402,14 @@ class ProactiveChatService:
             .count()
         )
 
-    def _window_sent_today(self, db, target_wecom_user_id: str, window_key: str, now: datetime) -> bool:
+    def _window_sent_today(self, db, target_channel: str, target_external_user_id: str, window_key: str, now: datetime) -> bool:
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = start_of_day + timedelta(days=1)
         return (
             db.query(ProactiveChatLog)
             .filter(
-                ProactiveChatLog.target_wecom_user_id == target_wecom_user_id,
+                ProactiveChatLog.target_channel == target_channel,
+                ProactiveChatLog.target_external_user_id == target_external_user_id,
                 ProactiveChatLog.status == "sent",
                 ProactiveChatLog.trigger_type == "scheduled",
                 ProactiveChatLog.window_key == window_key,
@@ -541,11 +420,12 @@ class ProactiveChatService:
             is not None
         )
 
-    def _already_sent_inactivity_since(self, db, target_wecom_user_id: str, since: datetime) -> bool:
+    def _already_sent_inactivity_since(self, db, target_channel: str, target_external_user_id: str, since: datetime) -> bool:
         return (
             db.query(ProactiveChatLog)
             .filter(
-                ProactiveChatLog.target_wecom_user_id == target_wecom_user_id,
+                ProactiveChatLog.target_channel == target_channel,
+                ProactiveChatLog.target_external_user_id == target_external_user_id,
                 ProactiveChatLog.status == "sent",
                 ProactiveChatLog.trigger_type == "inactivity",
                 ProactiveChatLog.sent_at >= since,
@@ -554,11 +434,12 @@ class ProactiveChatService:
             is not None
         )
 
-    def _get_last_success_log(self, db, target_wecom_user_id: str) -> Optional[ProactiveChatLog]:
+    def _get_last_success_log(self, db, target_channel: str, target_external_user_id: str) -> Optional[ProactiveChatLog]:
         return (
             db.query(ProactiveChatLog)
             .filter(
-                ProactiveChatLog.target_wecom_user_id == target_wecom_user_id,
+                ProactiveChatLog.target_channel == target_channel,
+                ProactiveChatLog.target_external_user_id == target_external_user_id,
                 ProactiveChatLog.status == "sent",
             )
             .order_by(ProactiveChatLog.sent_at.desc(), ProactiveChatLog.id.desc())
