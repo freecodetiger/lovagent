@@ -85,6 +85,16 @@ function Get-PythonCommand {
     return $null
 }
 
+function Get-CommandTailArguments {
+    param([string[]]$CommandParts)
+
+    if ($CommandParts.Length -le 1) {
+        return @()
+    }
+
+    return $CommandParts[1..($CommandParts.Length - 1)]
+}
+
 Write-Host "LovAgent 环境检查模式：$Mode"
 
 if (Get-Command git -ErrorAction SilentlyContinue) {
@@ -98,7 +108,7 @@ if (-not $pythonCommand) {
     Add-Fail "未找到可用的 Python 3.10+。"
     Write-Host "  安装示例：winget install Python.Python.3.12"
 } else {
-    $pythonVersion = & $pythonCommand[0] @($pythonCommand[1..($pythonCommand.Length - 1)]) --version 2>&1
+    $pythonVersion = & $pythonCommand[0] @(Get-CommandTailArguments -CommandParts $pythonCommand) --version 2>&1
     Add-Pass "Python 可用：$pythonVersion"
     if (Test-PythonVenvSupport -CommandParts $pythonCommand) {
         Add-Pass "Python 自带 venv / ensurepip。"
